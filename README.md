@@ -65,6 +65,38 @@ plus the adaptive controller's current multiplier and base frame rate.
 initialises Streamline. It is copied over the game's `Engine.ini` for the session and the original
 is put back on exit.
 
+## Frame caps and G-Sync
+
+Variable refresh only works while the frame rate stays below the monitor's refresh rate, and the
+gap it needs grows with the refresh rate because it is really a fixed slice of frame time. The
+cap NVIDIA Reflex applies with G-Sync is refresh minus refresh squared over 3600, which is what
+`TargetFps=auto` uses:
+
+| Refresh rate | Cap to use |
+| --- | --- |
+| 60 Hz | 59 |
+| 100 Hz | 97 |
+| 120 Hz | 116 |
+| 144 Hz | 138 |
+| 165 Hz | 157 |
+| 175 Hz | 166 |
+| 180 Hz | 171 |
+| 200 Hz | 188 |
+| 240 Hz | 224 |
+| 280 Hz | 258 |
+| 300 Hz | 275 |
+| 360 Hz | 324 |
+| 480 Hz | 416 |
+
+Set the system-wide limit in the NVIDIA app (Max Frame Rate) to the value for your monitor, and
+leave the in-game limit at or above it. The adaptive controller then aims at the same number, so
+frame generation never pushes the output past the variable refresh range, and a limit that is
+lower than the target never leaves the controller chasing a number it cannot reach. To aim at a
+fixed offset instead, set `RefreshMargin` to a number and the target becomes refresh minus that.
+
+The launcher records the refresh rate of the monitor the game window opens on in
+`AC8Tweaks\display.ini`, so the target follows the monitor even on multi-display systems.
+
 ## How it works
 
 `ac8tweaks.exe` stands in for the anti-cheat launcher. When Steam starts the game it enables the
