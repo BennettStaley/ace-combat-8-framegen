@@ -85,7 +85,7 @@ static void snapshot(const wchar_t *dir, const wchar_t *rel, wchar_t *out, size_
     h = FindFirstFileW(pat, &fd);
     if (h == INVALID_HANDLE_VALUE) return;
     do {
-        if (!wcscmp(fd.cFileName, L".") || !wcscmp(fd.cFileName, L"..") || !wcscmp(fd.cFileName, LOG_FILE)) continue;
+        if (!wcscmp(fd.cFileName, L".") || !wcscmp(fd.cFileName, L"..") || !wcscmp(fd.cFileName, LOG_FILE) || !wcscmp(fd.cFileName, DISPLAY_FILE)) continue;
         join(path, dir, fd.cFileName);
         swprintf(sub, PATHLEN, L"%ls/%ls", rel, fd.cFileName);
         if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
@@ -288,6 +288,20 @@ static void test_session_waits_for_respawned_game(void)
     check_unchanged();
 }
 
+static int display_hz(const wchar_t *mod)
+{
+    wchar_t path[PATHLEN], line[128];
+    FILE *f;
+    int hz = 0;
+    join(path, mod, DISPLAY_FILE);
+    f = _wfopen(path, L"r, ccs=UTF-8");
+    if (!f) return 0;
+    while (fgetws(line, ARRAYSIZE(line), f))
+        if (swscanf(line, L"RefreshHz=%d", &hz) == 1) break;
+    fclose(f);
+    return hz;
+}
+
 static int run(const wchar_t *exe, const wchar_t *args)
 {
     wchar_t cmd[PATHLEN * 2];
@@ -326,6 +340,7 @@ static void test_shipped_binary(const wchar_t *launcher)
     CHECK(is(g_case, L"result.txt", "ok"));
     CHECK(!has(p.mod, STATE_FILE));
     CHECK(has(p.mod, LOG_FILE));
+    CHECK(display_hz(p.mod) >= 24); /* the primary monitor is recorded before the game even opens a window */
 
     CHECK(run(toggler, L"--quiet") == 0);
     DeleteFileW(result);

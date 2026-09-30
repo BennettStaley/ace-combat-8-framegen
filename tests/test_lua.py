@@ -342,6 +342,35 @@ def test_adaptive_in_game(tmp):
     check(multiplier(L) == 2, "manual again")
 
 
+def test_auto_target(tmp):
+    settings = SETTINGS + "\n[Adaptive]\nEnabled=1\nTargetFps=auto\nHoldSeconds=3\nProbeSeconds=0\n"
+    L, M = boot(tmp, settings=settings)
+    M.main()
+    check(M.adaptive_cfg.auto and M.adaptive_cfg.target == 240, "no display.ini yet: default target kept")
+    check([M.gsync_cap(h) for h in (60, 120, 144, 165, 240, 360, 480)] == [59, 116, 138, 157, 224, 324, 416], "G-Sync cap table")
+    display = tmp / "AC8Tweaks" / "display.ini"
+    display.write_text("; launcher\n[Display]\nRefreshHz=240\nWidth=5120\nHeight=1440\n")
+    advance(L, uncapped=100, cap=0)
+    check(M.adaptive_cfg.target == 224 and M.refresh_hz == 240, f"auto resolves to the G-Sync cap: {M.adaptive_cfg.target}")
+    for _ in range(12):
+        advance(L, uncapped=100, cap=0)
+    state = (tmp / "AC8Tweaks" / "state.ini").read_text()
+    check("target_fps=224" in state and "refresh_hz=240" in state, f"state shows the resolved target: {state}")
+    L.eval("BINDS[6]")()
+    L.eval("BINDS[6]")()
+    check(hud_texts(L)[-1].startswith("Adaptive on, target 224\n") and "Adaptive: on, target 224 (auto, 240 Hz)" in hud_texts(L)[-1], f"toast: {hud_texts(L)[-1]}")
+    display.write_text("[Display]\nRefreshHz=144\n")
+    advance(L, uncapped=100, cap=0)
+    check(M.adaptive_cfg.target == 138, "follows the monitor the game moved to")
+    path = tmp / "AC8Tweaks" / "settings.ini"
+    path.write_text(path.read_text().replace("TargetFps=auto", "TargetFps=auto\nRefreshMargin=5"))
+    advance(L, uncapped=100, cap=0)
+    check(M.adaptive_cfg.target == 139, "a numeric margin is subtracted instead")
+    path.write_text(path.read_text().replace("TargetFps=auto", "TargetFps=200"))
+    advance(L, uncapped=100, cap=0)
+    check(not M.adaptive_cfg.auto and M.adaptive_cfg.target == 200, "a number switches auto off")
+
+
 def test_fov_hotkeys(tmp):
     L, M = boot(tmp, settings=FOV)
     M.main()

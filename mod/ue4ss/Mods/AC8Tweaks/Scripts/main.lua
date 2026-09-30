@@ -27,7 +27,7 @@ local DEFAULT_HOTKEYS = { CycleFrameGeneration = "F7", CycleReflex = "F8", Reloa
                           FovUp = "OEM_PLUS", FovDown = "OEM_MINUS" }
 local FOV_STEP = 5
 local FOV_LABELS = { Cockpit = "cockpit", HUD = "HUD", ThirdPerson = "third person" }
-local DEFAULT_ADAPTIVE = { enabled = false, target = 240, hold = 3, probe = 10 }
+local DEFAULT_ADAPTIVE = { enabled = false, target = 240, hold = 3, probe = 10, auto = false, margin = "auto" }
 local FOV_VIEWS = { "Cockpit", "HUD", "ThirdPerson" }
 local FOV_MIN, FOV_MAX = 40, 130
 local REFLEX_NAMES = { [0] = "off", [1] = "low latency", [2] = "boost" }
@@ -270,7 +270,8 @@ end
 -- Core
 -------------------------------------------------------------------------------
 
-M.settings_path, M.state_path = nil, nil
+M.settings_path, M.state_path, M.display_path = nil, nil, nil
+M.refresh_hz = nil -- from display.ini, written by the launcher
 M.desired = {} -- cvar -> value string, from settings.ini
 M.hotkeys = {} -- action -> key spec
 M.adaptive_cfg = DEFAULT_ADAPTIVE
@@ -289,8 +290,11 @@ local function apply_settings_text(text)
     for k, v in pairs(DEFAULT_HOTKEYS) do M.hotkeys[k] = v end
     for k, v in pairs(ini.Hotkeys or {}) do M.hotkeys[k] = v end
     local a = ini.Adaptive or {}
+    local spec = tostring(a.TargetFps or ""):lower()
     M.adaptive_cfg = {
         enabled = truthy(a.Enabled),
+        auto = spec == "auto",
+        margin = tonumber(a.RefreshMargin) or "auto",
         target = tonumber(a.TargetFps) or DEFAULT_ADAPTIVE.target,
         hold = math.max(1, math.floor(tonumber(a.HoldSeconds) or DEFAULT_ADAPTIVE.hold)),
         probe = math.floor(tonumber(a.ProbeSeconds) or DEFAULT_ADAPTIVE.probe),
@@ -318,7 +322,7 @@ function M.status_lines()
     return {
         "FG: " .. fg,
         "Reflex: " .. reflex,
-        "Adaptive: " .. (a.enabled and ("on, target " .. a.target) or "off"),
+        "Adaptive: " .. (a.enabled and ("on, target " .. a.target .. (a.auto and (" (auto, " .. tostring(M.refresh_hz or "?") .. " Hz)") or "")) or "off"),
         "FOV: " .. table.concat(parts, ", "),
     }
 end
@@ -353,12 +357,41 @@ function M.notify(message)
     if M.hud then M.hud.show(message .. "\n\n" .. table.concat(M.status_lines(), "\n"), M.toast_seconds) end
 end
 
+-- Highest frame rate that stays inside the variable refresh range of a monitor: the limit
+-- NVIDIA Reflex applies with G-Sync, refresh minus refresh squared over 3600.
+-- 60 -> 59, 120 -> 116, 144 -> 138, 165 -> 157, 240 -> 224, 360 -> 324, 480 -> 416.
+function M.gsync_cap(hz)
+    return math.floor(hz - hz * hz / 3600)
+end
+
+-- Reads the refresh rate the launcher recorded. nil when the file is missing or unreadable.
+function M.read_refresh_hz()
+    local text = M.display_path and read_file(M.display_path)
+    local hz = text and tonumber((M.parse_ini(text).Display or {}).RefreshHz)
+    return hz and hz > 0 and hz or nil
+end
+
+local refresh_warned = false
+-- Resolves TargetFps=auto against the monitor. Numeric targets are left alone.
+local function resolve_target()
+    local cfg = M.adaptive_cfg
+    if not cfg.auto then return end
+    M.refresh_hz = M.read_refresh_hz()
+    if M.refresh_hz then
+        cfg.target = cfg.margin == "auto" and M.gsync_cap(M.refresh_hz) or M.refresh_hz - cfg.margin
+    elseif not refresh_warned then
+        refresh_warned = true
+        log("refresh rate unknown, adaptive target stays at %d", cfg.target)
+    end
+end
+
 -- true when the file changed since the last read
 function M.load_settings()
     local text = read_file(M.settings_path)
     if not text or text == last_settings_text then return false end
     last_settings_text = text
     apply_settings_text(text)
+    resolve_target()
     return true
 end
 
@@ -430,6 +463,7 @@ local function adaptive_tick()
         M.adapt = {}
         return
     end
+    resolve_target()
     local a = M.adapt
     if not a.m then -- just switched on: continue from the manual values
         a.m = current_multiplier()
@@ -463,6 +497,7 @@ function M.write_state()
         lines[#lines + 1] = "base_fps=" .. base
         lines[#lines + 1] = "output_fps=" .. base * a.m
         lines[#lines + 1] = "target_fps=" .. M.adaptive_cfg.target
+        if M.adaptive_cfg.auto then lines[#lines + 1] = "refresh_hz=" .. tostring(M.refresh_hz or "unknown") end
     end
     local fov = M.fov and M.fov.status()
     if fov then
@@ -494,6 +529,7 @@ function M.set_option(section, key, value)
     last_settings_text = text -- our own write is not a change to react to
     write_file(M.settings_path, text)
     apply_settings_text(text)
+    resolve_target()
 end
 
 -- Changes one console variable everywhere: settings.ini, memory and the engine.
@@ -627,6 +663,7 @@ function M.main()
     end
     M.settings_path = root .. "\\AC8Tweaks\\settings.ini"
     M.state_path = root .. "\\AC8Tweaks\\state.ini"
+    M.display_path = root .. "\\AC8Tweaks\\display.ini"
     UEHelpers = require("UEHelpers")
     if not M.load_settings() then
         log("no readable settings at %s", M.settings_path)

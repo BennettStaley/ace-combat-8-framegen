@@ -34,6 +34,8 @@
 #define ENGINE_BAK  ENGINE_INI L".ac8tweaks-backup"
 #define STATE_FILE  L"armed.state"
 #define LOG_FILE    L"ac8tweaks.log"
+#define DISPLAY_FILE L"display.ini"  /* refresh rate of the monitor the game runs on, for the Lua core */
+#define WINDOW_PROBE_SECONDS 180
 #define OFF_EXT     L".off"
 
 /* Present in every build of this program, never in the official bootstrapper. */
@@ -298,6 +300,60 @@ static Toggle toggle(const Paths *p, const wchar_t **why)
     return NOW_OFFLINE;
 }
 
+static void write_display(const Paths *p, const wchar_t *device, const wchar_t *source)
+{
+    wchar_t path[PATHLEN];
+    DEVMODEW dm = { 0 };
+    FILE *f;
+    dm.dmSize = sizeof dm;
+    if (!EnumDisplaySettingsW(device, ENUM_CURRENT_SETTINGS, &dm)) return;
+    join(path, p->mod, DISPLAY_FILE);
+    f = _wfopen(path, L"w, ccs=UTF-8");
+    if (!f) return;
+    fwprintf(f, L"; Written by the launcher: the monitor the game runs on.\n[Display]\nRefreshHz=%lu\nWidth=%lu\nHeight=%lu\nSource=%ls\n",
+             dm.dmDisplayFrequency, dm.dmPelsWidth, dm.dmPelsHeight, source);
+    fclose(f);
+    logw(L"display: %lu Hz %lux%lu (%ls)", dm.dmDisplayFrequency, dm.dmPelsWidth, dm.dmPelsHeight, source);
+}
+
+typedef struct {
+    HANDLE job;
+    HWND found;
+} WindowSearch;
+
+/* The game's main window is a visible UnrealWindow owned by a process inside our job. */
+static BOOL CALLBACK find_game_window(HWND hwnd, LPARAM lp)
+{
+    WindowSearch *s = (WindowSearch *)lp;
+    wchar_t cls[32];
+    DWORD pid = 0;
+    HANDLE proc;
+    BOOL in_job = FALSE;
+    if (!IsWindowVisible(hwnd) || !GetClassNameW(hwnd, cls, ARRAYSIZE(cls)) || wcscmp(cls, L"UnrealWindow") != 0) return TRUE;
+    GetWindowThreadProcessId(hwnd, &pid);
+    proc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (proc) {
+        IsProcessInJob(proc, s->job, &in_job);
+        CloseHandle(proc);
+    }
+    if (!in_job) return TRUE;
+    s->found = hwnd;
+    return FALSE;
+}
+
+/* TRUE once the game window has been seen and its monitor recorded. */
+static BOOL probe_display(const Paths *p, HANDLE job)
+{
+    WindowSearch s = { job, NULL };
+    MONITORINFOEXW mi;
+    EnumWindows(find_game_window, (LPARAM)&s);
+    if (!s.found) return FALSE;
+    mi.cbSize = sizeof mi;
+    if (!GetMonitorInfoW(MonitorFromWindow(s.found, MONITOR_DEFAULTTONEAREST), (MONITORINFO *)&mi)) return FALSE;
+    write_display(p, mi.szDevice, L"game window");
+    return TRUE;
+}
+
 /* Arm, run the game without EAC, wait until it is fully gone, disarm. Returns the game's exit code, -1 if it never started. */
 static int run_session(const Paths *p, const wchar_t *args)
 {
@@ -309,9 +365,11 @@ static int run_session(const Paths *p, const wchar_t *args)
     DWORD code = 1, msg = 0;
     ULONG_PTR key;
     OVERLAPPED *ov;
+    int probes = 0;
 
     join(game, p->bin, GAME_EXE);
     arm(p);
+    write_display(p, NULL, L"primary monitor");
     SetEnvironmentVariableW(L"SteamAppId", APP_ID);
     SetEnvironmentVariableW(GUARD_ENV, L"1");
     SetEnvironmentVariableW(ROOT_ENV, p->root);
@@ -333,7 +391,18 @@ static int run_session(const Paths *p, const wchar_t *args)
     }
     if (AssignProcessToJobObject(job, pi.hProcess)) {
         ResumeThread(pi.hThread);
-        while (GetQueuedCompletionStatus(iocp, &msg, &key, &ov, INFINITE) && msg != JOB_OBJECT_MSG_ACTIVE_PROCESS_ZERO) {}
+        /* Poll once a second until the game window shows up, then wait quietly for the job to drain. */
+        for (;;) {
+            DWORD wait = probes < WINDOW_PROBE_SECONDS ? 1000 : INFINITE;
+            if (GetQueuedCompletionStatus(iocp, &msg, &key, &ov, wait)) {
+                if (msg == JOB_OBJECT_MSG_ACTIVE_PROCESS_ZERO) break;
+            } else if (GetLastError() == WAIT_TIMEOUT) {
+                probes++;
+                if (probe_display(p, job)) probes = WINDOW_PROBE_SECONDS;
+            } else {
+                break;
+            }
+        }
     } else {
         logw(L"job unavailable (%lu), waiting on the first process only", GetLastError());
         ResumeThread(pi.hThread);
