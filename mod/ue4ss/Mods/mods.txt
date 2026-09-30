@@ -1,0 +1,5 @@
+ConsoleEnablerMod : 1
+AC8Tweaks : 1
+
+; Built-in keybinds, do not move up!
+Keybinds : 0

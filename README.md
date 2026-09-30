@@ -1,0 +1,111 @@
+# AC8 Tweaks
+
+Runtime graphics control for ACE COMBAT 8: WINGS OF THEVE on PC. Offline single-player only.
+
+The game ships NVIDIA Streamline with DLSS frame generation, including multi frame generation,
+but exposes none of it in its menus. AC8 Tweaks turns it on, lets you change it mid-mission with
+hotkeys, can pick the multiplier for you to hit a target frame rate, and adds field of view
+control per camera view. Every change shows on screen and is saved for the next launch.
+
+## Features
+
+- DLSS frame generation off, 2x, 3x or 4x, switchable while flying
+- Adaptive mode: measures the base frame rate once a second and picks the smallest multiplier that reaches a target
+- Reflex off, low latency, or low latency with boost
+- Field of view per view: cockpit, HUD-only first person and third person, each with its own value
+- Any Unreal console variable listed in one ini file, applied live and kept applied if the game changes it back
+- On-screen text for every change, drawn by the game's own UI
+- One settings file in the game folder. Edit it in Notepad while playing; changes apply within a second
+
+## Requirements
+
+- Steam version of the game on Windows 11
+- An RTX 40 series card for 2x, RTX 50 series for 3x and 4x
+- Offline play. The mod never runs alongside Easy Anti-Cheat, so online modes are unavailable while it is on
+
+## Install
+
+1. Extract the release into the game folder, the one that contains `start_protected_game.exe`.
+2. Run `ac8tweaks.exe`. It reports "Offline mode is ON".
+3. Play from Steam as usual.
+
+Run `ac8tweaks.exe` again to go back online. It restores the official launcher and disables every
+mod file. Run it again after each game update, since updates put the official launcher back.
+
+## Hotkeys
+
+| Key | Action |
+| --- | --- |
+| F7 | Cycle frame generation: off, 2x, 3x, 4x |
+| F8 | Cycle Reflex: off, low latency, boost |
+| F6 | Adaptive mode on or off. Off keeps the multiplier it had reached |
+| = and - | Field of view of the view you are in, 5 degrees per press |
+| F9 | Reload `settings.ini` and apply everything again |
+| Tilde | The game's console, for typing any variable directly |
+
+All keys are rebindable under `[Hotkeys]` in `AC8Tweaks\settings.ini`, with `CTRL+`, `SHIFT+` and
+`ALT+` prefixes. An empty value unbinds.
+
+## Settings
+
+`AC8Tweaks\settings.ini` in the game folder, read at launch and whenever it changes.
+
+| Section | What it holds |
+| --- | --- |
+| `[ConsoleVariables]` | Unreal console variables and their values. Frame generation, Reflex and anything else you add |
+| `[Adaptive]` | `Enabled`, `TargetFps`, `HoldSeconds` between decisions, `ProbeSeconds` between attempts to step down when a frame cap hides headroom |
+| `[FOV]` | `Cockpit`, `HUD`, `ThirdPerson` in degrees, 40 to 130. 0 keeps the game's own value |
+| `[Overlay]` | `ToastSeconds`, how long the on-screen text stays |
+| `[Hotkeys]` | Key for each action |
+
+`AC8Tweaks\state.ini` next to it is written by the mod and shows what the engine actually reports,
+plus the adaptive controller's current multiplier and base frame rate.
+
+`AC8Tweaks\Engine.ini` holds the startup-only variables that must be in place before the game
+initialises Streamline. It is copied over the game's `Engine.ini` for the session and the original
+is put back on exit.
+
+## How it works
+
+`ac8tweaks.exe` stands in for the anti-cheat launcher. When Steam starts the game it enables the
+mod files, starts `AceCombat8.exe` directly with the same arguments the publisher's own no-anti-cheat
+launch option uses, waits until every game process has exited, and disables the mod files again.
+Outside a running session no mod file is active and the config folder is untouched, so a game
+update that restores the official launcher always starts a clean anti-cheat session. The game
+executable is never modified.
+
+Inside the game, UE4SS runs a Lua script that talks to the engine through its own reflection
+system: console variables through the Kismet library, the field of view through the player
+controller, and the on-screen text through a UMG widget. No memory patching, no signatures of
+our own.
+
+## Building
+
+Visual Studio 2022 with its bundled CMake, Python 3 with `lupa` for the Lua tests.
+
+```
+powershell -File tools\fetch_ue4ss.ps1
+cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+cmake --build build --config Release
+ctest --test-dir build -C Release
+cmake --install build --config Release --prefix dist
+```
+
+`dist` is the drop-in folder. `tools\deploy.ps1` copies it into the game and keeps your settings.
+
+Tests: the launcher self-test builds a fake install in a temp folder and checks that every mix of
+toggle, arm, crash and disarm leaves the install byte-for-byte as it was. The Lua tests run the
+real scripts under Lua 5.4 with the engine faked, including a simulated GPU for the adaptive
+controller.
+
+## Credits
+
+- [UE4SS](https://github.com/UE4SS-RE/RE-UE4SS) for the scripting runtime, MIT licensed
+- emoose, whose DLSS Framegen Enabler showed which startup variable the game needs
+- 4598llj, whose FOV Change mod found how the game selects its camera view and sets the field of view
+- techiew's Elden Ring EAC toggler for the launcher stand-in approach
+
+## Disclaimer
+
+Single-player use only. Do not attempt online play with the mod active. Not affiliated with
+Bandai Namco or NVIDIA.

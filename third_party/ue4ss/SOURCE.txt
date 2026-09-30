@@ -1,0 +1,4 @@
+RE-UE4SS, experimental build UE4SS_v3.0.1-1152-ge3ba1016 (MIT, see ue4ss/LICENSE)
+https://github.com/UE4SS-RE/RE-UE4SS/releases/download/experimental-latest/UE4SS_v3.0.1-1152-ge3ba1016.zip
+sha256 af8ea9d8975e8eff7967423f43b8b50875e66a29a0f434cffce6e0867ea17252
+Extracted as is, except dwmapi.dll is stored as dwmapi.dll.off so it is inert until the launcher enables it.

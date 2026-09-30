@@ -1,0 +1,16 @@
+# build output and the assembled drop-in folder
+build/
+dist/
+
+# vendored UE4SS build: fetched by tools/fetch_ue4ss.ps1, only the pin is tracked
+third_party/ue4ss/*
+!third_party/ue4ss/SOURCE.txt
+
+# working notes, not part of the project
+PLAN.md
+CLAUDE.md
+*Handoff*.md
+.fablize/
+
+__pycache__/
+*.pyc
