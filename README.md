@@ -1,18 +1,20 @@
 # AC8 Tweaks
 
-Runtime graphics control for ACE COMBAT 8: WINGS OF THEVE on PC. Offline single-player only.
+Field of view and DLSS frame generation control for ACE COMBAT 8: WINGS OF THEVE on PC,
+changeable mid-mission with hotkeys. Offline single-player only.
 
-The game ships NVIDIA Streamline with DLSS frame generation, including multi frame generation,
-but exposes none of it in its menus. AC8 Tweaks turns it on, lets you change it mid-mission with
-hotkeys, can pick the multiplier for you to hit a target frame rate, and adds field of view
-control per camera view. Every change shows on screen and is saved for the next launch.
+Two things the game does not let you change: the field of view, and the DLSS frame generation
+it ships with but never exposes. AC8 Tweaks gives you both. Set a separate field of view for the
+cockpit, the HUD-only view and the external camera with two keys while flying. Turn frame
+generation on at 2x, 3x or 4x, or let adaptive mode pick the multiplier for your monitor's
+refresh rate. Every change shows on screen and is saved for the next launch.
 
 ## Features
 
+- Field of view per view: cockpit, HUD-only first person and third person, each remembered separately, 40 to 130 degrees
 - DLSS frame generation off, 2x, 3x or 4x, switchable while flying
-- Adaptive mode: measures the base frame rate once a second and picks the smallest multiplier that reaches a target
+- Adaptive mode: measures the base frame rate once a second and picks the smallest multiplier that reaches a target, by default the G-Sync cap for your monitor
 - Reflex off, low latency, or low latency with boost
-- Field of view per view: cockpit, HUD-only first person and third person, each with its own value
 - Any Unreal console variable listed in one ini file, applied live and kept applied if the game changes it back
 - On-screen text for every change, drawn by the game's own UI
 - One settings file in the game folder. Edit it in Notepad while playing; changes apply within a second
@@ -31,6 +33,17 @@ control per camera view. Every change shows on screen and is saved for the next 
 
 Run `ac8tweaks.exe` again to go back online. It restores the official launcher and disables every
 mod file. Run it again after each game update, since updates put the official launcher back.
+
+## Field of view
+
+The game has three camera views and AC8 Tweaks keeps a value for each: `Cockpit`, `HUD` (first
+person without the cockpit) and `ThirdPerson`. Press `=` or `-` while flying and the view you are
+looking through moves 5 degrees and is saved. The other two views keep their own values. A view
+still on the game's default starts from the angle currently on screen, so the first press is a
+small nudge, not a jump. The on-screen text names the view and shows all three.
+
+Values live under `[FOV]` in `settings.ini`, 40 to 130 degrees. Set a view to 0 to hand it back to
+the game's own dynamic field of view. Edits in the file apply within a second, no restart.
 
 ## Hotkeys
 

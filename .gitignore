@@ -14,3 +14,6 @@ CLAUDE.md
 
 __pycache__/
 *.pyc
+
+# release archives
+AC8Tweaks-v*.zip
