@@ -24,7 +24,7 @@ local REFLEX_MODE = "t.Streamline.Reflex.Mode"
 local MAX_FPS = "t.MaxFPS"
 local MAX_STRIKES = 3 -- pushes that did not stick before a value is left alone
 local DEFAULT_HOTKEYS = { CycleFrameGeneration = "F7", CycleReflex = "F8", ReloadSettings = "F9", ToggleAdaptive = "F6",
-                          FovUp = "OEM_PLUS", FovDown = "OEM_MINUS" }
+                          FovUp = "OEM_PLUS", FovDown = "OEM_MINUS", DumpUI = "CTRL+F9" }
 local FOV_STEP = 5
 local FOV_LABELS = { Cockpit = "cockpit", HUD = "HUD", ThirdPerson = "third person" }
 local DEFAULT_ADAPTIVE = { enabled = false, target = 240, hold = 3, probe = 10, auto = false, margin = "auto" }
@@ -279,6 +279,7 @@ M.adapt = {} -- controller state while adaptive mode runs
 M.fov_cfg = M.parse_fov(nil)
 M.fov = nil -- the fov.lua module once started
 M.hud = nil -- the hud.lua module once started
+M.ui = nil -- the ui.lua module once started
 M.toast_seconds = DEFAULT_TOAST
 local last_settings_text, last_state_body = nil, nil
 local strikes = {} -- cvar -> pushes that did not stick since the value last changed
@@ -599,6 +600,17 @@ function M.reload()
     M.notify("Settings reloaded")
 end
 
+-- Writes the on-screen widget layout next to the settings, for working out how the HUD is built.
+function M.dump_ui()
+    if not M.ui then
+        M.notify("UI dump unavailable")
+        return
+    end
+    local path = M.settings_path:gsub("settings%.ini$", "ui-dump.txt")
+    local count, err = M.ui.dump(path, UEHelpers)
+    M.notify(count and string.format("UI layout of %d widgets written to ui-dump.txt", count) or ("UI dump failed: " .. tostring(err)))
+end
+
 local ACTIONS = {
     CycleFrameGeneration = M.cycle_frame_generation,
     CycleReflex = M.cycle_reflex,
@@ -606,6 +618,7 @@ local ACTIONS = {
     ToggleAdaptive = M.toggle_adaptive,
     FovUp = function() M.adjust_fov(FOV_STEP) end,
     FovDown = function() M.adjust_fov(-FOV_STEP) end,
+    DumpUI = M.dump_ui,
 }
 
 local function bind_hotkeys()
@@ -686,6 +699,8 @@ function M.main()
     else
         log("hud.lua not loaded: %s", tostring(hud))
     end
+    local ok3, ui = pcall(dofile, dir .. "ui.lua")
+    if ok3 then M.ui = ui else log("ui.lua not loaded: %s", tostring(ui)) end
     local n = 0
     for _ in pairs(M.desired) do n = n + 1 end
     log("active, %d console variables from %s, adaptive %s", n, M.settings_path, M.adaptive_cfg.enabled and "on" or "off")

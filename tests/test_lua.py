@@ -19,10 +19,11 @@ FG_FRAMES = "r.Streamline.DLSSG.FramesToGenerate"
 FAKES = r"""
 FAKE = { store = {}, execs = {}, pc_valid = true, unsettable = {}, frame = 0, time = 0 }
 Key = { F6 = 6, F7 = 7, F8 = 8, F9 = 9, A = 65, OEM_PLUS = 187, OEM_MINUS = 189 }
+BOUND_MODS = {}
 ModifierKey = { CONTROL = 1, SHIFT = 2, ALT = 3 }
 BINDS, LOOPS, LOG = {}, {}, {}
 print = function(...) LOG[#LOG + 1] = table.concat({...}, " ") end
-RegisterKeyBind = function(key, a, b) BINDS[key] = b or a end
+RegisterKeyBind = function(key, a, b) if b then BINDS['mod' .. key] = b; BOUND_MODS[key] = a else BINDS[key] = a end end
 ExecuteInGameThread = function(fn) fn() end
 LoopInGameThreadWithDelay = function(ms, fn) LOOPS[#LOOPS + 1] = fn return #LOOPS end
 FRAME_LOOPS, NOTIFY = {}, {}
@@ -255,7 +256,7 @@ def test_apply_and_state(tmp):
     L, M = boot(tmp)
     check(M.main() is True, "active")
     check(len(L.eval("LOOPS")) == 1, "one loop registered")
-    check(set(L.eval("BINDS").keys()) == {6, 7, 8, 9, 187, 189}, "six hotkeys bound, defaults fill the gaps")
+    check(set(L.eval("BINDS").keys()) == {6, 7, "mod8", 9, "mod9", 187, 189}, "seven hotkeys bound, defaults fill the gaps")
     tick(L)
     check(store(L, FG_ENABLE) == 1, "int applied")
     check(store(L, "r.Streamline.DeepDVC.Intensity") == 0.5, "float applied")
@@ -303,7 +304,7 @@ def test_hotkeys(tmp):
     check(text.startswith("; test settings\n[ConsoleVariables]\n; frame generation\n"), "comments and order kept")
     tick(L)
     check(store(L, FG_FRAMES) == 1, "poller does not fight the hotkey")
-    f8 = L.eval("BINDS[8]")
+    f8 = L.eval("BINDS['mod8']")  # the fixture binds Reflex to CTRL+F8
     f8()
     f8()
     check(store(L, "t.Streamline.Reflex.Mode") == 0, "reflex wraps 1 -> 2 -> 0")
@@ -371,6 +372,19 @@ def test_auto_target(tmp):
     check(not M.adaptive_cfg.auto and M.adaptive_cfg.target == 200, "a number switches auto off")
 
 
+def test_ui_dump(tmp):
+    L, M = boot(tmp)
+    M.main()
+    tick(L)
+    check(L.eval("BINDS['mod9']") is not None and list(L.eval("BOUND_MODS[9]").values()) == [1], "CTRL+F9 is bound with the control modifier")
+    check(L.eval("BINDS[9]") is not None, "plain F9 still reloads")
+    L.execute("FindAllOf = function(class) if class == 'UserWidget' then return {} end return nil end")
+    M.dump_ui()
+    dump = (tmp / "AC8Tweaks" / "ui-dump.txt").read_text()
+    check(dump.startswith("viewport=") or dump.strip() == "", f"dump file written: {dump!r}")
+    check(hud_texts(L)[-1].startswith("UI layout of 0 widgets written"), f"toast: {hud_texts(L)[-1]}")
+
+
 def test_fov_hotkeys(tmp):
     L, M = boot(tmp, settings=FOV)
     M.main()
@@ -404,7 +418,7 @@ def test_hud(tmp):
     check(L.eval("HUD.added") == 1000 and L.eval("HUD.pos").X == 80, "widget added to the viewport and positioned")
     delays = L.eval("HUD.delays")
     check(len(delays) == 1 and delays[1].ms == 6000, "hide scheduled after 6 s")
-    L.eval("BINDS[8]")()  # reflex -> boost, before the first hide fires
+    L.eval("BINDS['mod8']")()  # reflex -> boost, before the first hide fires
     check(hud_texts(L)[-1].startswith("Reflex boost\n\nFG: 3x\nReflex: boost\n"), f"reflex toast: {hud_texts(L)[-1]}")
     L.eval("HUD.delays[1].fn")()
     check(hud_vis(L)[-1] == 3, "stale hide ignored while a newer message is up")
@@ -509,7 +523,7 @@ def test_missing_settings(tmp):
     check(M.main() is True, "still active without settings.ini")
     tick(L)
     check(execs(L) == 0, "nothing sent")
-    check(set(L.eval("BINDS").keys()) == {6, 7, 8, 9, 187, 189}, "default hotkeys still bound")
+    check(set(L.eval("BINDS").keys()) == {6, 7, 8, 9, "mod9", 187, 189}, "default hotkeys still bound")
 
 
 if __name__ == "__main__":
