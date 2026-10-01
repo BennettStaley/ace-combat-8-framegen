@@ -19,6 +19,7 @@ refresh rate. Every change shows on screen and is saved for the next launch.
 - On-screen text for every change, drawn by the game's own UI
 - One settings file in the game folder. Edit it in Notepad while playing; changes apply within a second
 
+<img width="5120" height="1440" alt="20260930191121_1" src="https://github.com/user-attachments/assets/68488bfe-aba4-4527-ac1b-4c00af4c1671" />
 <img width="5120" height="1440" alt="20260930183712_1" src="https://github.com/user-attachments/assets/6bfa7738-5ffd-4964-9a76-6e68a2041f84" />
 <img width="358" height="141" alt="image" src="https://github.com/user-attachments/assets/100cbe70-05ed-48ab-9a19-4ba6d7c00a8e" />
 
