@@ -2,15 +2,16 @@
 AC8 Tweaks runtime core. Runs under UE4SS.
 
 Applies the console variables listed in AC8Tweaks\settings.ini, pushes them again whenever the
-engine reports a different value, re-reads the file whenever it changes on disk, and cycles frame
-generation and Reflex on hotkeys. What the engine actually reports is written to
-AC8Tweaks\state.ini whenever it changes.
+engine reports a different value, and re-reads the file whenever it changes on disk. What the
+engine actually reports is written to AC8Tweaks\state.ini whenever it changes.
 
 Adaptive mode picks the frame generation multiplier (off, 2x, 3x, 4x) once a second so that
 base frame rate times multiplier reaches a target, and probes downward when the output is capped.
 
 Field of view per camera view lives in fov.lua next to this file and reads the [FOV] section.
-On-screen text for every change lives in hud.lua and reads [Overlay].
+The in-game menu (F10) holds every setting. ac8overlay.dll draws it, menu.lua feeds it, and the
+rows are in this file. The quick keys under [Keys] are optional and start out unset; the menu DLL
+watches them, so a key picked in the menu works at once.
 
 Does nothing unless the offline launcher started the game (AC8TWEAKS_OFFLINE=1).
 ]]
@@ -23,15 +24,20 @@ local FG_KEYS = { [FG_ENABLE] = true, [FG_FRAMES] = true }
 local REFLEX_MODE = "t.Streamline.Reflex.Mode"
 local MAX_FPS = "t.MaxFPS"
 local MAX_STRIKES = 3 -- pushes that did not stick before a value is left alone
-local DEFAULT_HOTKEYS = { CycleFrameGeneration = "F7", CycleReflex = "F8", ReloadSettings = "F9", ToggleAdaptive = "F6",
-                          FovUp = "OEM_PLUS", FovDown = "OEM_MINUS", DumpUI = "CTRL+F9" }
 local FOV_STEP = 5
 local FOV_LABELS = { Cockpit = "cockpit", HUD = "HUD", ThirdPerson = "third person" }
 local DEFAULT_ADAPTIVE = { enabled = false, target = 240, hold = 3, probe = 10, auto = false, margin = "auto" }
 local FOV_VIEWS = { "Cockpit", "HUD", "ThirdPerson" }
 local FOV_MIN, FOV_MAX = 40, 130
 local REFLEX_NAMES = { [0] = "off", [1] = "low latency", [2] = "boost" }
-local DEFAULT_TOAST = 6
+local NOTE_SECONDS = 6 -- how long a message stays at the top of the menu
+local TOAST_SECONDS = 4 -- how long what a quick key did stays on screen
+local KEY_ACTIONS = { "Menu", "CycleFrameGeneration", "ToggleAdaptive", "CycleReflex", "FovUp", "FovDown" }
+local KEY_LABELS = { Menu = "Open and close this menu", CycleFrameGeneration = "Frame generation: off, 2x, 3x, 4x",
+                     ToggleAdaptive = "Adaptive frame generation on or off", CycleReflex = "Reflex: off, low latency, boost",
+                     FovUp = "Field of view up, in the view you are in", FovDown = "Field of view down" }
+local DEFAULT_KEYS = { Menu = "F10" } -- the quick keys start out unset
+local MODIFIERS = { { "CONTROL", "CTRL", 256 }, { "SHIFT", "SHIFT", 512 }, { "ALT", "ALT", 1024 } }
 
 local function log(fmt, ...)
     print(TAG .. string.format(fmt, ...) .. "\n")
@@ -109,14 +115,14 @@ function M.update_ini(text, section, key, value)
     return table.concat(lines, "\n")
 end
 
--- off -> 2x -> 3x -> 4x -> off
+-- off -> 2x -> 3x -> 4x -> off, as the two console variables: enable, frames
 function M.next_frame_generation(enable, frames)
     if enable == 0 then return 1, 1 end
     if frames < 3 then return 1, frames + 1 end
     return 0, frames
 end
 
--- "CTRL+SHIFT+F7" -> "F7", { "CONTROL", "SHIFT" }
+-- "ctrl+shift+f7" -> "F7", { "CONTROL", "SHIFT" }
 function M.parse_key(spec)
     local key, mods = nil, {}
     for part in spec:upper():gmatch("[^+%s]+") do
@@ -129,6 +135,36 @@ function M.parse_key(spec)
         end
     end
     return key, mods
+end
+
+-- A key as the one number the menu DLL deals in: the Windows key code, plus 256 for CTRL, 512 for
+-- SHIFT and 1024 for ALT. `names` is UE4SS's Key table. 0 when the text names no key in it.
+function M.key_code(spec, names)
+    local key, mods = M.parse_key(spec or "")
+    local code = key and names[key]
+    if math.type(code) ~= "integer" then return 0 end
+    for _, held in ipairs(mods) do
+        for _, m in ipairs(MODIFIERS) do
+            if m[1] == held then code = code | m[3] end
+        end
+    end
+    return code
+end
+
+-- The other way round, written the way settings.ini has it: 377 -> "CTRL+F10". nil for a key
+-- UE4SS has no name for. Of several names for one key the shortest wins, so the answer is stable.
+function M.key_name(code, names)
+    local vk, best = code & 255, nil
+    for name, value in pairs(names) do
+        if value == vk and (not best or #name < #best or (#name == #best and name < best)) then best = name end
+    end
+    if not best then return nil end
+    local out = {}
+    for _, m in ipairs(MODIFIERS) do
+        if code & m[3] ~= 0 then out[#out + 1] = m[2] end
+    end
+    out[#out + 1] = best
+    return table.concat(out, "+")
 end
 
 function M.is_float(value)
@@ -273,23 +309,24 @@ end
 M.settings_path, M.state_path, M.display_path = nil, nil, nil
 M.refresh_hz = nil -- from display.ini, written by the launcher
 M.desired = {} -- cvar -> value string, from settings.ini
-M.hotkeys = {} -- action -> key spec
 M.adaptive_cfg = DEFAULT_ADAPTIVE
 M.adapt = {} -- controller state while adaptive mode runs
 M.fov_cfg = M.parse_fov(nil)
 M.fov = nil -- the fov.lua module once started
-M.hud = nil -- the hud.lua module once started
-M.ui = nil -- the ui.lua module once started
-M.toast_seconds = DEFAULT_TOAST
+M.menu = nil -- the menu.lua module once started
+M.menu_cfg = { enabled = true, hdr = "auto", nits = 200 }
+M.keys = {} -- action -> key the way settings.ini writes it ("F10", "CTRL+F7"), "" for none
 local last_settings_text, last_state_body = nil, nil
 local strikes = {} -- cvar -> pushes that did not stick since the value last changed
+local unknown_keys = {} -- key texts already reported as unusable
+
+local function key_names()
+    return type(Key) == "table" and Key or {}
+end
 
 local function apply_settings_text(text)
     local ini = M.parse_ini(text)
     M.desired = ini.ConsoleVariables or {}
-    M.hotkeys = {}
-    for k, v in pairs(DEFAULT_HOTKEYS) do M.hotkeys[k] = v end
-    for k, v in pairs(ini.Hotkeys or {}) do M.hotkeys[k] = v end
     local a = ini.Adaptive or {}
     local spec = tostring(a.TargetFps or ""):lower()
     M.adaptive_cfg = {
@@ -301,31 +338,25 @@ local function apply_settings_text(text)
         probe = math.floor(tonumber(a.ProbeSeconds) or DEFAULT_ADAPTIVE.probe),
     }
     M.fov_cfg = M.parse_fov(ini.FOV)
-    M.toast_seconds = tonumber((ini.Overlay or {}).ToastSeconds) or DEFAULT_TOAST
+    local menu = ini.Menu or {}
+    M.menu_cfg = { enabled = menu.Enabled == nil or truthy(menu.Enabled), hdr = tostring(menu.Hdr or "auto"):lower(),
+                   nits = tonumber(menu.Nits) or 200 }
+    M.keys = {}
+    for _, action in ipairs(KEY_ACTIONS) do
+        local spec = (ini.Keys or {})[action] or DEFAULT_KEYS[action] or ""
+        local name = M.key_name(M.key_code(spec, key_names()), key_names())
+        if spec ~= "" and not name and not unknown_keys[spec] then
+            unknown_keys[spec] = true
+            log("unknown key '%s' for %s", spec, action)
+        end
+        M.keys[action] = name or DEFAULT_KEYS[action] or "" -- the menu always has a key
+    end
     strikes = {}
 end
 
 local function fg_name(desired)
     if (tonumber(desired[FG_ENABLE]) or 0) == 0 then return "off" end
     return ((tonumber(desired[FG_FRAMES]) or 1) + 1) .. "x"
-end
-
--- Everything that matters, one item per line, shown under every message.
-function M.status_lines()
-    local a = M.adaptive_cfg
-    local fg = a.enabled and M.adapt.m and multiplier_name(M.adapt.m) .. " (adaptive, target " .. a.target .. ")" or fg_name(M.desired)
-    local reflex = REFLEX_NAMES[tonumber(M.desired[REFLEX_MODE]) or -1] or "?"
-    local f = M.fov_cfg
-    local parts = {}
-    for _, view in ipairs(FOV_VIEWS) do
-        parts[#parts + 1] = FOV_LABELS[view] .. " " .. (f[view] > 0 and tostring(f[view]) or "default")
-    end
-    return {
-        "FG: " .. fg,
-        "Reflex: " .. reflex,
-        "Adaptive: " .. (a.enabled and ("on, target " .. a.target .. (a.auto and (" (auto, " .. tostring(M.refresh_hz or "?") .. " Hz)") or "")) or "off"),
-        "FOV: " .. table.concat(parts, ", "),
-    }
 end
 
 -- Human-readable list of what differs between two loaded settings, for edits made on disk.
@@ -352,10 +383,15 @@ function M.describe_changes(old_desired, new_desired, old_adaptive, new_adaptive
     return out
 end
 
--- Logs the message and puts it on screen with the status line beneath.
+local from_key = false -- true while a quick key's action runs
+
+-- Logs the message and shows it at the top of the menu. While the menu is closed nothing is drawn,
+-- except for what a quick key did: that stays on screen for a moment, there being no menu to look at.
 function M.notify(message)
     log("%s", message)
-    if M.hud then M.hud.show(message .. "\n\n" .. table.concat(M.status_lines(), "\n"), M.toast_seconds) end
+    if not M.menu then return end
+    M.menu.say(message, NOTE_SECONDS)
+    if from_key then M.menu.toast(message, TOAST_SECONDS) end
 end
 
 -- Highest frame rate that stays inside the variable refresh range of a monitor: the limit
@@ -476,7 +512,7 @@ local function adaptive_tick()
     local m = M.adaptive_step(a, a.base, cfg.target, read_back(MAX_FPS, "0.0"), cfg.hold, cfg.probe)
     if m ~= before then
         apply_multiplier(m)
-        M.notify(string.format("Adaptive %s (base %d fps)", multiplier_name(m), a.base or 0))
+        M.notify(string.format("Adaptive %s (base %d fps)", multiplier_name(m), math.floor((a.base or 0) + 0.5)))
     end
 end
 
@@ -522,6 +558,7 @@ function M.tick()
     M.apply(false)
     adaptive_tick()
     M.write_state()
+    M.update_menu_header()
 end
 
 -- Writes one key in settings.ini and takes the new file as the current settings.
@@ -560,105 +597,209 @@ function M.toggle_adaptive()
     end
 end
 
--- Moves the field of view of the view the player is in by one step and saves it.
--- A view still on the game's own value starts from the angle currently rendered.
-function M.adjust_fov(delta)
-    local now = M.fov and M.fov.current()
-    if not now or not now.view then
-        M.notify("FOV: not in a cockpit, HUD or third person view")
-        return
-    end
-    local base = M.fov_cfg[now.view]
-    if base == 0 then base = math.floor((now.angle or 90) + 0.5) end
-    local value = math.max(FOV_MIN, math.min(FOV_MAX, base + delta))
-    M.set_option("FOV", now.view, value)
-    M.notify(string.format("FOV %s %d", FOV_LABELS[now.view], value))
-end
-
 function M.cycle_frame_generation()
     leave_adaptive()
-    local enable = tonumber(M.desired[FG_ENABLE]) or 0
-    local frames = tonumber(M.desired[FG_FRAMES]) or 1
-    enable, frames = M.next_frame_generation(enable, frames)
+    local enable, frames = M.next_frame_generation(tonumber(M.desired[FG_ENABLE]) or 0, tonumber(M.desired[FG_FRAMES]) or 1)
     M.set(FG_FRAMES, frames)
     M.set(FG_ENABLE, enable)
     M.notify("Frame generation " .. (enable == 0 and "off" or (frames + 1) .. "x"))
 end
 
 function M.cycle_reflex()
-    local mode = (tonumber(M.desired[REFLEX_MODE]) or 0) + 1
-    if mode > 2 then mode = 0 end
+    local mode = ((tonumber(M.desired[REFLEX_MODE]) or 0) + 1) % 3
     M.set(REFLEX_MODE, mode)
     M.notify("Reflex " .. REFLEX_NAMES[mode])
 end
 
-function M.reload()
-    last_settings_text = nil
-    M.load_settings()
-    M.apply(true)
-    M.write_state()
-    M.notify("Settings reloaded")
-end
-
--- Writes the on-screen widget layout next to the settings, for working out how the HUD is built.
-function M.dump_ui()
-    if not M.ui then
-        M.notify("UI dump unavailable")
+-- Moves the field of view of the view the player is in by one step and saves it.
+-- A view still on the game's own value starts from the angle currently rendered.
+function M.adjust_fov(delta)
+    local now = M.fov and M.fov.current()
+    if not now or not now.view then
+        M.notify("Field of view: not in a cockpit, HUD or third person view")
         return
     end
-    local path = M.settings_path:gsub("settings%.ini$", "ui-dump.txt")
-    local count, err = M.ui.dump(path, UEHelpers)
-    M.notify(count and string.format("UI layout of %d widgets written to ui-dump.txt", count) or ("UI dump failed: " .. tostring(err)))
+    local base = M.fov_cfg[now.view]
+    if base == 0 then base = math.floor((now.angle or 90) + 0.5) end
+    local value = math.max(FOV_MIN, math.min(FOV_MAX, base + delta))
+    M.set_option("FOV", now.view, value)
+    M.notify(string.format("Field of view, %s: %d", FOV_LABELS[now.view], value))
 end
 
 local ACTIONS = {
     CycleFrameGeneration = M.cycle_frame_generation,
-    CycleReflex = M.cycle_reflex,
-    ReloadSettings = M.reload,
     ToggleAdaptive = M.toggle_adaptive,
+    CycleReflex = M.cycle_reflex,
     FovUp = function() M.adjust_fov(FOV_STEP) end,
     FovDown = function() M.adjust_fov(-FOV_STEP) end,
-    DumpUI = M.dump_ui,
 }
 
-local function bind_hotkeys()
-    for name, action in pairs(ACTIONS) do
-        local spec = M.hotkeys[name]
-        if spec and spec ~= "" then
-            local keyname, mods = M.parse_key(spec)
-            local key = keyname and Key[keyname]
-            if not key then
-                log("unknown key '%s' for %s", spec, name)
-            else
-                local modifiers = {}
-                for _, m in ipairs(mods) do modifiers[#modifiers + 1] = ModifierKey[m] end
-                local callback = function() ExecuteInGameThread(action) end
-                if #modifiers == 0 then
-                    RegisterKeyBind(key, callback)
-                else
-                    RegisterKeyBind(key, modifiers, callback)
-                end
-                log("%s bound to %s", name, spec)
+-- Carries out what a quick key is set to.
+function M.key_pressed(action)
+    local fn = ACTIONS[action]
+    if not fn then return end
+    from_key = true
+    local ok, err = pcall(fn)
+    from_key = false
+    if not ok then log("%s failed: %s", action, tostring(err)) end
+end
+
+-- What the menu DLL needs to know besides the rows: whether to draw for HDR, how bright, the key
+-- that opens it and the quick keys to watch.
+function M.update_menu_header()
+    if not M.menu then return end
+    local cfg, h = M.menu_cfg, M.menu.header
+    local hdr = cfg.hdr == "on" or (cfg.hdr ~= "off" and (read_back("r.HDR.EnableHDROutput", "0") or 0) ~= 0)
+    h.hdr, h.nits = hdr and 1 or 0, cfg.nits
+    h.key, h.key_name, h.hotkeys = M.key_code(M.keys.Menu, key_names()), M.keys.Menu, {}
+    for _, action in ipairs(KEY_ACTIONS) do
+        local code = M.key_code(M.keys[action], key_names())
+        if ACTIONS[action] and code > 0 then h.hotkeys[#h.hotkeys + 1] = { id = action, code = code } end
+    end
+end
+
+-- Without the menu DLL the quick keys go through UE4SS instead, as they did before there was a
+-- menu. UE4SS cannot take a key back, so these are the keys settings.ini had when the game started.
+local function bind_keys_without_menu()
+    for action in pairs(ACTIONS) do
+        local spec = M.keys[action]
+        local name, mods = M.parse_key(spec)
+        local key = name and key_names()[name]
+        if key then
+            local modifiers = {}
+            for _, m in ipairs(mods) do modifiers[#modifiers + 1] = ModifierKey[m] end
+            local callback = function()
+                ExecuteInGameThread(function()
+                    if M.keys[action] == spec then M.key_pressed(action) end
+                end)
             end
+            if #modifiers == 0 then
+                RegisterKeyBind(key, callback)
+            else
+                RegisterKeyBind(key, modifiers, callback)
+            end
+            log("%s bound to %s", action, spec)
         end
     end
 end
 
-local tick_errors = 0
-local function safe_tick()
-    local ok, err = pcall(M.tick)
-    if not ok then
-        tick_errors = tick_errors + 1
-        if tick_errors <= 3 then log("tick failed: %s", tostring(err)) end
+-- One row per camera view. 0 hands the view back to the game; anything else is 40 to 130 degrees.
+local function fov_row(view)
+    return { id = "fov_" .. view, kind = "number", label = "Field of view, " .. FOV_LABELS[view] .. " (0 = game's own)",
+        step = FOV_STEP, min = 0, max = FOV_MAX, decimals = 0,
+        get = function() return M.fov_cfg[view] end,
+        set = function(v)
+            v = math.floor(v + 0.5)
+            -- one step below the lowest angle is "the game's own"; anything else too low becomes the lowest angle
+            if v > 0 and v < FOV_MIN then v = M.fov_cfg[view] == FOV_MIN and 0 or FOV_MIN end
+            M.set_option("FOV", view, v)
+        end }
+end
+
+-- One row per key. Pressing it makes the menu DLL wait for the next key and send it here as a number, 0 for none.
+local function key_row(action)
+    return { id = "key_" .. action, kind = "key", label = KEY_LABELS[action],
+        get = function() return M.keys[action] end,
+        set = function(code)
+            local spec = ""
+            if code > 0 then spec = M.key_name(code, key_names()) end
+            if not spec then return M.notify("That key cannot be used") end
+            if spec == "" and action == "Menu" then return M.notify("The menu needs a key") end
+            for _, other in ipairs(KEY_ACTIONS) do -- a key does one thing
+                if other ~= action and spec ~= "" and M.keys[other] == spec then
+                    if other == "Menu" then return M.notify(spec .. " already opens the menu") end
+                    M.set_option("Keys", other, "")
+                end
+            end
+            M.set_option("Keys", action, spec)
+            M.update_menu_header()
+        end }
+end
+
+local function key_rows()
+    local rows = {}
+    for _, action in ipairs(KEY_ACTIONS) do rows[#rows + 1] = key_row(action) end
+    return rows
+end
+
+local HDR_CHOICES = { "auto", "on", "off" }
+
+local function graphics_rows()
+    local rows = {
+        { id = "fg", kind = "choice", label = "Frame generation", choices = { "off", "2x", "3x", "4x" },
+          get = function() return (M.adaptive_cfg.enabled and M.adapt.m or current_multiplier()) - 1 end,
+          set = function(i)
+              leave_adaptive()
+              if i > 0 then M.set(FG_FRAMES, i) end
+              M.set(FG_ENABLE, i > 0 and 1 or 0)
+          end },
+        { id = "adaptive", kind = "switch", label = "Adaptive frame generation",
+          get = function() return M.adaptive_cfg.enabled end,
+          set = function(on)
+              if on ~= M.adaptive_cfg.enabled then M.toggle_adaptive() end
+          end },
+        { id = "target", kind = "number", label = "Adaptive target fps (0 = monitor)", step = 1, min = 0, max = 1000, decimals = 0,
+          get = function() return M.adaptive_cfg.auto and 0 or M.adaptive_cfg.target end,
+          set = function(v)
+              v = math.floor(v + 0.5)
+              M.set_option("Adaptive", "TargetFps", v > 0 and v or "auto")
+          end },
+        { id = "reflex", kind = "choice", label = "Reflex", choices = { "off", "low latency", "boost" },
+          get = function() return tonumber(M.desired[REFLEX_MODE]) or 0 end,
+          set = function(i) M.set(REFLEX_MODE, i) end },
+    }
+    for _, view in ipairs(FOV_VIEWS) do rows[#rows + 1] = fov_row(view) end
+    return rows
+end
+
+local function menu_rows()
+    return {
+        { id = "hdr", kind = "choice", label = "Menu in HDR", choices = HDR_CHOICES,
+          get = function()
+              for i, name in ipairs(HDR_CHOICES) do
+                  if name == M.menu_cfg.hdr then return i - 1 end
+              end
+              return 0
+          end,
+          set = function(i)
+              M.set_option("Menu", "Hdr", HDR_CHOICES[i + 1] or "auto")
+              M.update_menu_header()
+          end },
+        { id = "nits", kind = "number", label = "Menu brightness, nits", step = 20, min = 80, max = 1000, decimals = 0,
+          get = function() return M.menu_cfg.nits end,
+          set = function(v)
+              M.set_option("Menu", "Nits", math.floor(v + 0.5))
+              M.update_menu_header()
+          end },
+    }
+end
+
+function M.menu_sections()
+    return {
+        { id = "graphics", label = "Graphics", open = true, build = graphics_rows },
+        { id = "keys", label = "Keys", open = false, build = key_rows },
+        { id = "menu", label = "Menu", open = false, build = menu_rows },
+    }
+end
+
+-- fn wrapped so that an error is logged the first three times and never stops the loop
+local function guarded(what, fn)
+    local errors = 0
+    return function()
+        local ok, err = pcall(fn)
+        if not ok then
+            errors = errors + 1
+            if errors <= 3 then log("%s failed: %s", what, tostring(err)) end
+        end
     end
 end
 
-local function start_loop()
+local function start_loop(ms, fn)
     if type(LoopInGameThreadWithDelay) == "function" then
-        LoopInGameThreadWithDelay(1000, safe_tick)
+        LoopInGameThreadWithDelay(ms, fn)
     else
-        LoopAsync(1000, function()
-            ExecuteInGameThread(safe_tick)
+        LoopAsync(ms, function()
+            ExecuteInGameThread(fn)
             return false
         end)
     end
@@ -682,8 +823,7 @@ function M.main()
         log("no readable settings at %s", M.settings_path)
         apply_settings_text("")
     end
-    bind_hotkeys()
-    start_loop()
+    start_loop(1000, guarded("tick", function() M.tick() end))
     local dir = AC8TWEAKS_SCRIPT_DIR or debug.getinfo(1, "S").source:sub(2):match("^(.*[/\\])") or ""
     local ok, fov = pcall(dofile, dir .. "fov.lua")
     if ok then
@@ -692,15 +832,19 @@ function M.main()
     else
         log("fov.lua not loaded: %s", tostring(fov))
     end
-    local ok2, hud = pcall(dofile, dir .. "hud.lua")
-    if ok2 then
-        M.hud = hud
-        hud.start(UEHelpers)
-    else
-        log("hud.lua not loaded: %s", tostring(hud))
+    if M.menu_cfg.enabled then
+        local ok2, menu = pcall(dofile, dir .. "menu.lua")
+        if ok2 then
+            M.menu = menu
+            menu.sections, menu.on_key = M.menu_sections, M.key_pressed
+            menu.start(root .. "\\AC8Tweaks\\", read_file, write_file)
+            M.update_menu_header()
+            start_loop(100, guarded("menu", menu.tick))
+        else
+            log("menu.lua not loaded: %s", tostring(menu))
+        end
     end
-    local ok3, ui = pcall(dofile, dir .. "ui.lua")
-    if ok3 then M.ui = ui else log("ui.lua not loaded: %s", tostring(ui)) end
+    if not (M.menu and M.menu.loaded) then bind_keys_without_menu() end
     local n = 0
     for _ in pairs(M.desired) do n = n + 1 end
     log("active, %d console variables from %s, adaptive %s", n, M.settings_path, M.adaptive_cfg.enabled and "on" or "off")

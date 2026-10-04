@@ -15,6 +15,10 @@ $keep = Join-Path $GameRoot "AC8Tweaks\settings.ini"
 $hadSettings = Test-Path $keep
 if ($hadSettings) { $saved = Get-Content $keep -Raw }
 
+# Scripts that are no longer part of the mod must not stay behind in the game.
+$scripts = Join-Path $GameRoot "Game\Binaries\Win64\ue4ss\Mods\AC8Tweaks"
+if (Test-Path $scripts) { Remove-Item $scripts -Recurse -Force }
+
 Copy-Item (Join-Path $dist "*") $GameRoot -Recurse -Force
 
 if ($hadSettings) { Set-Content $keep $saved -NoNewline }
