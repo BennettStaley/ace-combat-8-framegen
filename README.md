@@ -157,6 +157,14 @@ already uses F10, pick a different key under `[Keys]` in `settings.ini`. To run 
 altogether, set `Enabled=0` under `[Menu]`: the quick keys in the file still work, read once when
 the game starts.
 
+**Windows Security removed `start_protected_game.exe`.** It has flagged the launcher on at least
+one machine as `Trojan:Win32/Bearfoos.A!ml`. That is a machine-learning guess and a false positive;
+the launcher's source is in this repository. If it happens while the game is running, the mod
+files are still switched on afterwards, so do not press Play. Use Steam's "Verify integrity of
+game files" to get the official launcher back, then run `ac8tweaks.exe`: once to carry on playing
+offline, a second time if you want to go back online. Either way the mod files are put back in
+order. Allow the file in your antivirus to keep it from happening again.
+
 **Does it work with the bundled ACE COMBAT ZERO?** No. That is a separate program with its own
 engine and no DLSS, so nothing here applies to it.
 

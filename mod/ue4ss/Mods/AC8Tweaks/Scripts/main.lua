@@ -549,7 +549,36 @@ function M.write_state()
     return write_file(M.state_path, body)
 end
 
+-- The game ships without a console object. One is made here, so the keys the game itself has for
+-- it (tilde) open it. UE4SS's own ConsoleEnablerMod is left off: it also puts the console on F10,
+-- which is the menu's key. Tried once a second until the viewport exists.
+local console_done = false
+local function enable_console()
+    local engine = UEHelpers.GetEngine()
+    local viewport = engine:IsValid() and engine.GameViewport
+    if not viewport or not viewport:IsValid() then return end
+    if not viewport.ViewportConsole:IsValid() then
+        local console = StaticConstructObject(StaticFindObject("/Script/Engine.Console"), viewport)
+        if not console:IsValid() then return end
+        viewport.ViewportConsole = console
+    end
+    console_done = true
+    local keys = {}
+    pcall(function()
+        local list = StaticFindObject("/Script/Engine.Default__InputSettings").ConsoleKeys
+        for i = 1, #list do keys[#keys + 1] = list[i].KeyName:ToString() end
+    end)
+    log("console ready, keys: %s", table.concat(keys, ", "))
+end
+
 function M.tick()
+    if not console_done then
+        local ok, err = pcall(enable_console)
+        if not ok then
+            console_done = true
+            log("console not enabled: %s", tostring(err))
+        end
+    end
     local old_desired, old_adaptive, old_fov = M.desired, M.adaptive_cfg, M.fov_cfg
     if M.load_settings() and old_desired then
         local changes = M.describe_changes(old_desired, M.desired, old_adaptive, M.adaptive_cfg, old_fov, M.fov_cfg)

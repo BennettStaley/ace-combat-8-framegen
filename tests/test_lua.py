@@ -48,6 +48,7 @@ package.preload["UEHelpers"] = function()
         GetGameplayStatics = function() return stats end,
         GetPlayerController = function() FAKE.pc_searches = (FAKE.pc_searches or 0) + 1 return pc end,
         GetGameViewportClient = function() return { IsValid = function() return false end } end,
+        GetEngine = function() return FAKE.engine end,
     }
 end
 
@@ -79,10 +80,17 @@ StaticFindObject = function(path)
     return classes[path] or obj({ valid = false })
 end
 StaticConstructObject = function(class, outer)
+    FAKE.constructed = (FAKE.constructed or 0) + 1
     return obj({ SetText = function(self, t) HUD.texts[#HUD.texts + 1] = t end,
                  SetShadowOffset = function() end, SetShadowColorAndOpacity = function() end })
 end
 FText = function(s) return s end
+
+-- the engine, its viewport and the console keys, as the console set-up reads them
+FAKE.viewport = obj({ valid = false, ViewportConsole = obj({ valid = false }) })
+FAKE.engine = obj({ GameViewport = FAKE.viewport })
+local function console_key(name) return { KeyName = { ToString = function() return name end } } end
+classes["/Script/Engine.Default__InputSettings"] = obj({ ConsoleKeys = { console_key("Tilde"), console_key("F12") } })
 
 """
 
@@ -599,6 +607,21 @@ def test_keys(tmp):
     tick(L)
     menu_key, fov_down = M["keys"]["Menu"], M["keys"]["FovDown"]
     check(menu_key == "F10" and fov_down == "ALT+A", f"a key the file gets wrong falls back, one it gets right is read in any case: {menu_key} {fov_down}")
+
+
+def test_console(tmp):
+    L, M = boot(tmp)
+    M.main()
+    tick(L)
+    FAKE = L.eval("FAKE")
+    check(FAKE.constructed is None, "no viewport yet, no console")
+    L.execute("FAKE.viewport.valid = true")
+    tick(L)
+    tick(L)
+    check(FAKE.constructed == 1 and FAKE.viewport.ViewportConsole.IsValid(), "the console is made once the viewport exists, and once only")
+    check(any("console ready, keys: Tilde, F12" in l for l in L.eval("LOG").values()), "and the log says which keys the game has for it")
+    mods = (ROOT / "mod" / "ue4ss" / "Mods" / "mods.txt").read_text()
+    check("ConsoleEnablerMod : 0" in mods, "UE4SS's own console mod stays off: it puts the console on F10, the menu's key")
 
 
 def test_keys_without_menu(tmp):

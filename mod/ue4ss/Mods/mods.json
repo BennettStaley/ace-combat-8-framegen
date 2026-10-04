@@ -1,5 +1,5 @@
 [
-    { "mod_name": "ConsoleEnablerMod", "mod_enabled": true },
+    { "mod_name": "ConsoleEnablerMod", "mod_enabled": false },
     { "mod_name": "AC8Tweaks", "mod_enabled": true },
     { "mod_name": "Keybinds", "mod_enabled": false }
 ]

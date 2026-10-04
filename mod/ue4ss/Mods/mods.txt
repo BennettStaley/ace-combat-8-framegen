@@ -1,4 +1,5 @@
-ConsoleEnablerMod : 1
+; Off: it puts the console on F10, the menu's key. AC8Tweaks enables the console itself.
+ConsoleEnablerMod : 0
 AC8Tweaks : 1
 
 ; Built-in keybinds, do not move up!
