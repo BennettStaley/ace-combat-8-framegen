@@ -166,8 +166,6 @@ game files" to get the official launcher back, then run `ac8tweaks.exe`: once to
 offline, a second time if you want to go back online. Either way the mod files are put back in
 order. Allow the file in your antivirus to keep it from happening again.
 
-**Does it work with the bundled ACE COMBAT ZERO?** No. That is a separate program with its own
-engine and no DLSS, so nothing here applies to it.
 
 ## How it works
 
