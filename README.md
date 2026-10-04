@@ -1,4 +1,3 @@
-<img width="5120" height="1440" alt="20260930191124_1" src="https://github.com/user-attachments/assets/5bc58bb5-5375-43dc-8a7f-fe66a629829a" />
 # AC8 Tweaks
 
 Field of view and DLSS frame generation control for ACE COMBAT 8: WINGS OF THEVE on PC, from an
