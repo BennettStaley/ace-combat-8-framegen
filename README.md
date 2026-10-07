@@ -22,10 +22,7 @@ next launch.
 - One settings file in the game folder for those who prefer it. Edit it in Notepad while playing; changes apply within a second
 - Any Unreal console variable listed in that file, applied live and kept applied if the game changes it back
 
-<img width="5120" height="1440" alt="20261004144026_1" src="https://github.com/user-attachments/assets/75f5f7a1-77a9-4529-bbdf-f2e723ce8b5e" />
-<img width="514" height="363" alt="image" src="https://github.com/user-attachments/assets/0b0ccaa1-bf08-405f-a885-cac71cdfd5bc" />
-<img width="5120" height="1440" alt="20260930191124_1" src="https://github.com/user-attachments/assets/52bac981-c2ca-4e62-90b1-f07c2231f4b0" />
-
+<img width="513" height="696" alt="image" src="https://github.com/user-attachments/assets/7df507c4-cfae-4bd1-83fa-2ac76ff39774" />
 
 ## Requirements
 
