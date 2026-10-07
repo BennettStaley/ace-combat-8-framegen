@@ -16,6 +16,9 @@ next launch.
 - Field of view per view: cockpit, HUD-only first person and third person, each remembered separately, 40 to 130 degrees
 - DLSS frame generation off, 2x, 3x or 4x, switchable while flying
 - The DLSS super resolution model: the game's own CNN or NVIDIA's transformer models, with a line on what each one is, switchable while flying
+- RTX Dynamic Vibrance, NVIDIA's neural colour filter that the game ships but never switches on, with intensity and saturation sliders
+- Sharpening, and switches for motion blur, film grain, depth of field and chromatic aberration
+- An optional readout in the corner: rendered and shown frame rate, and the DLSS model
 - Adaptive mode: measures the base frame rate once a second and picks the smallest multiplier that reaches a target, by default the G-Sync cap for your monitor
 - Reflex off, low latency, or low latency with boost
 - Optional quick keys for frame generation, adaptive mode, Reflex and field of view, picked in the menu by pressing the key you want
@@ -48,6 +51,10 @@ first, or use Steam's "Verify integrity of game files", so that only one copy is
 Updating from an earlier release: extract the new one over it. That replaces `settings.ini`, so
 note your values first or set them again in the menu.
 
+The release replaces one game file, the RTX Dynamic Vibrance model `nvngx_deepdvc.dll`, with a
+build that has no evaluation watermark. See "Colour and post-processing" for why, and for how
+Steam's file verification undoes it.
+
 ## The menu
 
 F10 opens and closes it. Use the mouse, or the arrow keys with Space and Enter. While it is open
@@ -55,9 +62,9 @@ the keys and clicks it uses do not reach the game; a gamepad keeps flying the ai
 
 | Group | What is in it |
 | --- | --- |
-| Graphics | Frame generation, adaptive mode and its target, Reflex, the DLSS model, and the field of view of each of the three views |
+| Graphics | Frame generation, adaptive mode and its target, Reflex, the DLSS model, vibrance, sharpening, the post-processing switches, and the field of view of each of the three views |
 | Keys | The key that opens the menu, and the optional quick keys |
-| Menu | How the menu is drawn on an HDR screen, and how bright |
+| Menu | The performance readout, and how the menu is drawn on an HDR screen, and how bright |
 
 Everything in the menu is written to `settings.ini` as you change it.
 
@@ -66,9 +73,6 @@ Everything in the menu is written to `settings.ini` as you change it.
 The game has three camera views and AC8 Tweaks keeps a value for each: cockpit, HUD (first person
 without the cockpit) and third person. Each has its own row in the menu, 40 to 130 degrees. Set a
 view to 0 to hand it back to the game's own dynamic field of view.
-
-The zoom on a target you hold focus on still works with your own value: the view narrows by the
-same proportion as it does in the unmodified game.
 
 ## DLSS model
 
@@ -103,6 +107,34 @@ menu.
 In `settings.ini` the model is `r.NGX.DLSS.Preset` under `[ConsoleVariables]`, by NVIDIA's
 number: 0 default, 1 to 6 for A to F, 10 to 13 for J to M.
 
+## Colour and post-processing
+
+**RTX Dynamic Vibrance** is NVIDIA's neural colour filter: it raises saturation where the picture
+is flat and leaves faces, sky and already rich colours alone. The game ships it inside its
+Streamline plugin but never switches it on. Two sliders in the Graphics group: intensity, 0 to 1
+with 0 off, and a saturation boost that only shows once intensity is high. In `settings.ini` they
+are `r.Streamline.DeepDVC.Intensity` and `r.Streamline.DeepDVC.SaturationBoost`.
+
+The copy of the filter the game ships is NVIDIA's evaluation build, which writes "DeepDVC - DO NOT
+DISTRIBUTE" across the screen while it runs, and so does every copy in NVIDIA's public SDK. The
+release therefore carries a release build of the same file, `nvngx_deepdvc.dll` version 310.1 as
+shipped with UL's 3DMark DLSS feature test, and installs it over the game's copy in
+`Game\Plugins\Marketplace\nvidia\StreamlineCore\Binaries\ThirdParty\Win64`. The game never loads
+that file on its own, only a session with vibrance on does. Steam's "Verify integrity of game
+files" puts the game's copy back, after which vibrance shows the watermark again until you extract
+the release once more. Where the file is from is recorded in `third_party/deepdvc/SOURCE.txt`.
+
+**Sharpening** is the engine's own tonemapper sharpening, 0 to 1, with no extra pass from DLSS or
+NIS. **Motion blur**, **film grain**, **depth of field** and **chromatic aberration** are
+switches for effects the game leaves on. Unchecked forces the effect off, checked gives the
+engine's default back, and a switch that has never been touched shows what the engine currently
+reports. In `settings.ini`: `r.Tonemapper.Sharpen`, `r.MotionBlur.Amount`, `r.FilmGrain`,
+`r.DepthOfFieldQuality` and `r.SceneColorFringeQuality`.
+
+**Performance readout**: a switch in the Menu group puts one line in the top-right corner with
+the rendered frame rate, the shown frame rate and multiplier when frame generation is on, and
+the DLSS model. It is `Overlay=1` under `[Menu]` in `settings.ini`.
+
 ## Keys
 
 Out of the box the mod uses one key, F10. To change it, open the Keys group, press the button
@@ -131,11 +163,11 @@ writes the same file, so the two never disagree.
 
 | Section | What it holds |
 | --- | --- |
-| `[ConsoleVariables]` | Unreal console variables and their values. Frame generation, Reflex, the DLSS model and anything else you add |
+| `[ConsoleVariables]` | Unreal console variables and their values. Frame generation, Reflex, the DLSS model, vibrance and anything else you add |
 | `[Adaptive]` | `Enabled`, `TargetFps`, `HoldSeconds` between decisions, `ProbeSeconds` between attempts to step down when a frame cap hides headroom |
 | `[FOV]` | `Cockpit`, `HUD`, `ThirdPerson` in degrees, 40 to 130. 0 keeps the game's own value |
 | `[Keys]` | `Menu` and the quick keys, by name: `F7`, `CTRL+F7`, `NUM_ZERO`, `OEM_PLUS`. Empty means no key |
-| `[Menu]` | `Enabled`, and `Hdr` and `Nits` for how the menu is drawn on an HDR screen |
+| `[Menu]` | `Enabled`, `Overlay` for the performance readout, and `Hdr` and `Nits` for how the menu is drawn on an HDR screen |
 
 So frame generation needs no key at all: whatever `[ConsoleVariables]` and `[Adaptive]` say is
 applied every time the game starts.

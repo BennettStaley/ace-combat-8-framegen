@@ -67,7 +67,7 @@ struct Section {
 struct Hotkey { std::string id; int code; };
 
 struct Menu {
-    std::string title = "AC8 Tweaks", note, toast;
+    std::string title = "AC8 Tweaks", note, toast, stats;
     int hdr = 0;
     float nits = 200.0f;
     unsigned long long ack = 0;
@@ -133,6 +133,7 @@ static std::shared_ptr<Menu> parse_menu(const std::string &text)
         else if (tag == "title") menu->title = field(1);
         else if (tag == "note") menu->note = field(1);
         else if (tag == "toast") menu->toast = field(1);
+        else if (tag == "stats") menu->stats = field(1);
         else if (tag == "key" || tag == "hotkey") {
             bool quick = tag == "hotkey";
             int code = atoi(field(quick ? 2 : 1).c_str());
@@ -506,6 +507,17 @@ static void draw_toast(const Menu &m, float width, float height)
     ImGui::End();
 }
 
+/* A small always-on readout in the top-right corner: render and generated frame rate, the DLSS model. */
+static void draw_stats(const Menu &m, float width, float height)
+{
+    ImGui::SetNextWindowPos(ImVec2(width * 0.985f, height * 0.025f), ImGuiCond_Always, ImVec2(1.0f, 0.0f));
+    ImGui::SetNextWindowBgAlpha(0.55f);
+    if (ImGui::Begin("###ac8stats", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoInputs |
+                                                 ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing))
+        ImGui::TextUnformatted(m.stats.c_str());
+    ImGui::End();
+}
+
 /* ------------------------------------------------------------------------------------------ */
 /* Direct3D 12                                                                                 */
 /* ------------------------------------------------------------------------------------------ */
@@ -824,7 +836,8 @@ static bool render(IDXGISwapChain *sc, const DXGI_SWAP_CHAIN_DESC &desc, float p
         ImGui::GetIO().MouseDrawCursor = g_open; /* the game hides its own pointer in flight */
         ImGui::NewFrame();
         if (g_open) draw_menu(*menu, (float)w, (float)h);
-        else draw_toast(*menu, (float)w, (float)h);
+        else if (!menu->toast.empty()) draw_toast(*menu, (float)w, (float)h);
+        if (!menu->stats.empty()) draw_stats(*menu, (float)w, (float)h);
         ImGui::Render();
     }
 
@@ -949,7 +962,7 @@ static void on_present(IDXGISwapChain *sc)
             ImGui::GetIO().ClearInputMouse();
         }
     }
-    if (!g_open && menu->toast.empty()) return;
+    if (!g_open && menu->toast.empty() && menu->stats.empty()) return;
     if (!render(sc, desc, presents_per_second, menu)) {
         g_dead = true;
         logf("drawing failed, the menu is off until the game restarts");

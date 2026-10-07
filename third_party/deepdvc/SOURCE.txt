@@ -1,0 +1,8 @@
+nvngx_deepdvc.dll, NVIDIA RTX Dynamic Vibrance (DeepDVC) NGX model, version 310.1.0.0, signed by NVIDIA Corporation.
+sha256 010d78fce42b09626cbeeaa505930996bdea14cfe0b71a46563ab7a1f0dc63ba
+Taken from the NVIDIA DLSS feature test that ships with UL 3DMark (dlc\nvidia-dlss-test\nvidia-dlss-test-4\bin\x64).
+Why: the copy the game ships (310.2.0.0) and every copy in NVIDIA's public Streamline SDK are evaluation builds
+that draw "DeepDVC - DO NOT DISTRIBUTE - CONTACT NVIDIA TO OBTAIN DLLs FOR YOUR APPLICATION" across the screen.
+This build has no watermark. Installed over the game's copy at
+Game\Plugins\Marketplace\nvidia\StreamlineCore\Binaries\ThirdParty\Win64\nvngx_deepdvc.dll.
+Steam's "Verify integrity of game files" puts the game's own copy back.

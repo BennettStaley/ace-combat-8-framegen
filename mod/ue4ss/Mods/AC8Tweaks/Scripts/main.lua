@@ -40,6 +40,17 @@ local DLSS_MODELS = {
 }
 local DLSS_MODEL_NAMES = {}
 for i, m in ipairs(DLSS_MODELS) do DLSS_MODEL_NAMES[i] = m.name end
+-- RTX Dynamic Vibrance (DeepDVC): an AI colour filter the game ships but hides. Loaded at startup by
+-- r.Streamline.Load.DeepDVC in Engine.ini; Intensity 0 turns it off, SaturationBoost only bites once intensity is high.
+local DVC_INTENSITY = "r.Streamline.DeepDVC.Intensity"
+local DVC_SATURATION = "r.Streamline.DeepDVC.SaturationBoost"
+-- Post-process effects the game leaves on. Each is a switch: unchecked forces it off, checked restores a sane value.
+local MOTION_BLUR = "r.MotionBlur.Amount"   -- float, 0 off, 0.5 is the engine default
+local FILM_GRAIN = "r.FilmGrain"            -- 0 off, 1 on
+local DOF_QUALITY = "r.DepthOfFieldQuality" -- 0 off, 2 default
+local FRINGE = "r.SceneColorFringeQuality"  -- chromatic aberration: 0 off, 1 on
+-- Sharpening built into the tonemapper, 0 off to 1 full. No NIS or DLSS sharpening pass needed.
+local TONEMAP_SHARPEN = "r.Tonemapper.Sharpen"
 local MAX_FPS = "t.MaxFPS"
 local MAX_STRIKES = 3 -- pushes that did not stick before a value is left alone
 local FOV_STEP = 5
@@ -330,10 +341,11 @@ M.refresh_hz = nil -- from display.ini, written by the launcher
 M.desired = {} -- cvar -> value string, from settings.ini
 M.adaptive_cfg = DEFAULT_ADAPTIVE
 M.adapt = {} -- controller state while adaptive mode runs
+M.perf = {} -- frame-rate measurement for the on-screen overlay, when adaptive mode is not already doing it
 M.fov_cfg = M.parse_fov(nil)
 M.fov = nil -- the fov.lua module once started
 M.menu = nil -- the menu.lua module once started
-M.menu_cfg = { enabled = true, hdr = "auto", nits = 200 }
+M.menu_cfg = { enabled = true, hdr = "auto", nits = 200, overlay = false }
 M.keys = {} -- action -> key the way settings.ini writes it ("F10", "CTRL+F7"), "" for none
 local last_settings_text, last_state_body = nil, nil
 local strikes = {} -- cvar -> pushes that did not stick since the value last changed
@@ -359,7 +371,7 @@ local function apply_settings_text(text)
     M.fov_cfg = M.parse_fov(ini.FOV)
     local menu = ini.Menu or {}
     M.menu_cfg = { enabled = menu.Enabled == nil or truthy(menu.Enabled), hdr = tostring(menu.Hdr or "auto"):lower(),
-                   nits = tonumber(menu.Nits) or 200 }
+                   nits = tonumber(menu.Nits) or 200, overlay = truthy(menu.Overlay) }
     M.keys = {}
     for _, action in ipairs(KEY_ACTIONS) do
         local spec = (ini.Keys or {})[action] or DEFAULT_KEYS[action] or ""
@@ -509,14 +521,16 @@ local function apply_multiplier(m)
 end
 
 local clock_failed = false
-local function measure_base_fps()
+-- Measures the engine's render frame rate into the counters held in `a` (M.adapt for the controller,
+-- M.perf for the overlay). The engine counts rendered frames, not generated ones, so this is the base.
+local function measure_base_fps(a)
+    a = a or M.adapt
     local ok, frame, now = pcall(engine.frame_clock)
     if not ok and not clock_failed then
         clock_failed = true
         log("frame clock unavailable, adaptive mode cannot measure: %s", tostring(frame))
     end
     if not ok or not frame or not now then return nil end
-    local a = M.adapt
     local fps
     if a.last_frame and now > a.last_time then
         fps = (frame - a.last_frame) / (now - a.last_time)
@@ -551,6 +565,24 @@ local function adaptive_tick()
         apply_multiplier(m)
         M.notify(string.format("Adaptive %s (base %d fps)", multiplier_name(m), math.floor((a.base or 0) + 0.5)))
     end
+end
+
+-- One line for the on-screen overlay: render frame rate, generated output, and the DLSS model.
+-- Reuses the controller's measurement when adaptive mode is on, measures into M.perf otherwise.
+function M.perf_stats()
+    local base = M.adaptive_cfg.enabled and M.adapt.base or measure_base_fps(M.perf)
+    M.perf.base = base
+    if not base or base <= 0 then return "AC8  measuring..." end
+    local m = (M.adaptive_cfg.enabled and M.adapt.m) or current_multiplier()
+    local parts = {}
+    if m > 1 then
+        parts[#parts + 1] = string.format("%d render", math.floor(base + 0.5))
+        parts[#parts + 1] = string.format("%d shown (x%d)", math.floor(base * m + 0.5), m)
+    else
+        parts[#parts + 1] = string.format("%d fps", math.floor(base + 0.5))
+    end
+    parts[#parts + 1] = "DLSS " .. DLSS_MODELS[M.dlss_model_index()].name
+    return table.concat(parts, "   ")
 end
 
 function M.write_state()
@@ -625,6 +657,10 @@ function M.tick()
     adaptive_tick()
     M.write_state()
     M.update_menu_header()
+    if M.menu then
+        M.menu.header.stats = M.menu_cfg.overlay and M.perf_stats() or ""
+        if not M.menu_cfg.overlay then M.perf = {} end
+    end
 end
 
 -- Writes one key in settings.ini and takes the new file as the current settings.
@@ -801,6 +837,25 @@ local function key_rows()
     return rows
 end
 
+-- A switch for a post-process effect the game leaves on. Unchecked forces the cvar to 0; checked
+-- restores `on_value`. Reads the live engine value until the switch has been touched once.
+local function effect_switch(id, label, cvar, on_value, float)
+    return { id = id, kind = "switch", label = label,
+        get = function()
+            local v = M.desired[cvar]
+            if v == nil then v = read_back(cvar, float and "0.0" or "0") end
+            return (tonumber(v) or 0) ~= 0
+        end,
+        set = function(on) M.set(cvar, on and on_value or 0) end }
+end
+
+-- A 0-to-1 slider written with two decimals: DeepDVC values and tonemapper sharpening.
+local function slider_row(id, label, cvar, default)
+    return { id = id, kind = "number", label = label, step = 0.05, min = 0, max = 1, decimals = 2,
+        get = function() return tonumber(M.desired[cvar]) or default end,
+        set = function(v) M.set(cvar, string.format("%.2f", math.max(0, math.min(1, v)))) end }
+end
+
 local HDR_CHOICES = { "auto", "on", "off" }
 
 local function graphics_rows()
@@ -833,6 +888,13 @@ local function graphics_rows()
         { id = "dlss_about", kind = "text",
           get = function() return DLSS_MODELS[M.dlss_model_index()].family end,
           label = DLSS_MODELS[M.dlss_model_index()].about },
+        slider_row("dvc", "RTX Dynamic Vibrance (0 = off)", DVC_INTENSITY, 0),
+        slider_row("dvc_sat", "Vibrance saturation boost", DVC_SATURATION, 0.5),
+        slider_row("sharpen", "Sharpening (0 = off)", TONEMAP_SHARPEN, 0),
+        effect_switch("mblur", "Motion blur", MOTION_BLUR, 0.5, true),
+        effect_switch("grain", "Film grain", FILM_GRAIN, 1, false),
+        effect_switch("dof", "Depth of field", DOF_QUALITY, 2, false),
+        effect_switch("fringe", "Chromatic aberration", FRINGE, 1, false),
     }
     for _, view in ipairs(FOV_VIEWS) do rows[#rows + 1] = fov_row(view) end
     return rows
@@ -840,6 +902,9 @@ end
 
 local function menu_rows()
     return {
+        { id = "overlay", kind = "switch", label = "Performance overlay (fps and DLSS model)",
+          get = function() return M.menu_cfg.overlay end,
+          set = function(on) M.set_option("Menu", "Overlay", on and 1 or 0) end },
         { id = "hdr", kind = "choice", label = "Menu in HDR", choices = HDR_CHOICES,
           get = function()
               for i, name in ipairs(HDR_CHOICES) do

@@ -6,6 +6,10 @@ dist/
 third_party/ue4ss/*
 !third_party/ue4ss/SOURCE.txt
 
+# NVIDIA RTX Dynamic Vibrance model without the evaluation watermark: provenance in SOURCE.txt, binary untracked
+third_party/deepdvc/*
+!third_party/deepdvc/SOURCE.txt
+
 # working notes, not part of the project
 PLAN.md
 CLAUDE.md

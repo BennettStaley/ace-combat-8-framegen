@@ -166,6 +166,25 @@ def run_toast(harness, dll, keep):
         check(1000 < changed < 40000, f"toast: {changed} pixels drawn, expected a line of text in a small box")
 
 
+def run_stats(harness, dll, keep):
+    """With the menu closed, a stats line draws a small readout in the top-right and nothing else."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = pathlib.Path(tmp)
+        (tmp / "AC8Tweaks").mkdir()
+        (tmp / "AC8Tweaks" / "menu.txt").write_text(MENU.format(ack=0) + "stats\t72 render   216 shown (x3)   DLSS K\n")
+        out = subprocess.run([str(harness), str(dll), "rgba8", str(tmp), "30", "cap:25:stats"], stdout=subprocess.PIPE, text=True, timeout=60)
+        check(out.returncode == 0 and "done" in out.stdout, f"harness failed: {out.stdout!r}")
+        check(not (tmp / "AC8Tweaks" / "menu-events.txt").exists(), "showing stats is not an event")
+        px = load(tmp / "stats.raw", "rgba8")
+        if keep:
+            save_png(px, 1.0, pathlib.Path(keep) / "rgba8-stats.png")
+        changed = sum(not is_sky(p) for p in px)
+        check(1000 < changed < 40000, f"stats: {changed} pixels drawn, expected a line of text")
+        check(is_sky(px[5 * W + 5]), "stats: top-left corner untouched (the overlay sits top-right)")
+        top_right = sum(not is_sky(px[y * W + x]) for y in range(0, H // 4) for x in range(3 * W // 4, W))
+        check(top_right > 500, f"stats: drawn in the top-right region ({top_right} px)")
+
+
 if __name__ == "__main__":
     harness, dll = pathlib.Path(sys.argv[1]).resolve(), pathlib.Path(sys.argv[2]).resolve()
     keep = sys.argv[3] if len(sys.argv) > 3 else None
@@ -176,4 +195,7 @@ if __name__ == "__main__":
     before = failures
     run_toast(harness, dll, keep)
     print(f"{'ok  ' if failures == before else 'FAIL'} text for a quick key")
+    before = failures
+    run_stats(harness, dll, keep)
+    print(f"{'ok  ' if failures == before else 'FAIL'} performance overlay")
     sys.exit(1 if failures else 0)

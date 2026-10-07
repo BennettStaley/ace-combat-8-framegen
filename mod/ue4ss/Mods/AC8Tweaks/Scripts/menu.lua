@@ -87,6 +87,7 @@ function N.render()
     if N.note and os.time() < N.note_until then out[#out + 1] = "note\t" .. clean(N.note) end
     if N.toast_text and os.time() >= N.toast_until then N.toast_text = nil end
     if N.toast_text then out[#out + 1] = "toast\t" .. clean(N.toast_text) end
+    if N.header.stats and N.header.stats ~= "" then out[#out + 1] = "stats\t" .. clean(N.header.stats) end
     by_id = {}
     if N.open then
         for _, s in ipairs(N.sections()) do
@@ -163,7 +164,8 @@ function N.tick()
     ticks = ticks + 1
     local text = N.read(N.events_path)
     local changed = text ~= nil and N.handle(text)
-    if not changed and ticks % ((N.open or N.toast_text) and 3 or 10) ~= 0 then return end
+    local active = N.open or N.toast_text or (N.header.stats and N.header.stats ~= "")
+    if not changed and ticks % (active and 3 or 10) ~= 0 then return end
     local started = os.clock()
     local body = N.render()
     local took = os.clock() - started

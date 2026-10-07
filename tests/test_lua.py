@@ -353,6 +353,53 @@ def test_menu_dlss_model(tmp):
     check(f"row\tdlss\tchoice\tDLSS model\t0\t{names}" in lines, f"a number that is no model shows as the default: {lines}")
 
 
+def test_vibrance_and_effects(tmp):
+    L, M = boot(tmp)
+    M.main()
+    tick(L)
+    lines = menu_send(L, tmp, "1\tmenu\t1")
+    check(any(l.startswith("row\tdvc\tnumber\tRTX Dynamic Vibrance (0 = off)\t") and l.endswith("\t0\t1\t2") for l in lines), f"vibrance intensity row: {lines}")
+    check(any(l.startswith("row\tsharpen\tnumber\tSharpening (0 = off)\t") and l.endswith("\t0\t1\t2") for l in lines), f"sharpening slider: {lines}")
+    check(any(l.startswith("row\tmblur\tswitch\tMotion blur\t") for l in lines), f"motion blur switch present: {lines}")
+    use_menu(L, M, tmp, "set\tdvc\t0.6", "set\tdvc_sat\t0.3")
+    check(abs(store(L, "r.Streamline.DeepDVC.Intensity") - 0.6) < 1e-6, "intensity set in the engine")
+    check(abs(store(L, "r.Streamline.DeepDVC.SaturationBoost") - 0.3) < 1e-6, "saturation set in the engine")
+    check("r.Streamline.DeepDVC.Intensity=0.60" in settings_text(tmp), "vibrance saved with two decimals")
+    L.execute("FAKE.store['r.MotionBlur.Amount'] = 0.5")  # the game reports motion blur on
+    lines = menu_send(L, tmp, "1\tmenu\t1")
+    check("row\tmblur\tswitch\tMotion blur\t1" in lines, f"motion blur reads on from the live engine value: {lines}")
+    use_menu(L, M, tmp, "set\tsharpen\t0.4")
+    check(abs(store(L, "r.Tonemapper.Sharpen") - 0.4) < 1e-6 and "r.Tonemapper.Sharpen=0.40" in settings_text(tmp), "sharpening set and saved")
+    use_menu(L, M, tmp, "set\tmblur\t0", "set\tgrain\t0", "set\tdof\t0", "set\tfringe\t0")
+    check(store(L, "r.MotionBlur.Amount") == 0 and "r.MotionBlur.Amount=0" in settings_text(tmp), "motion blur forced off and saved")
+    check(store(L, "r.FilmGrain") == 0 and store(L, "r.DepthOfFieldQuality") == 0, "film grain and depth of field off")
+    check(store(L, "r.SceneColorFringeQuality") == 0 and "r.SceneColorFringeQuality=0" in settings_text(tmp), "chromatic aberration off and saved")
+    use_menu(L, M, tmp, "set\tmblur\t1")
+    check(abs(store(L, "r.MotionBlur.Amount") - 0.5) < 1e-6, "re-checking restores a sane value")
+
+
+def test_perf_overlay(tmp):
+    L, M = boot(tmp)
+    M.main()
+    tick(L)
+    check(M.menu.header.stats == "", "overlay off by default: no stats line")
+    use_menu(L, M, tmp, "set\toverlay\t1", "set\tfg\t0")   # overlay on, frame generation off
+    check(M.menu_cfg.overlay and "Overlay=1" in settings_text(tmp), "overlay switched on and saved")
+    L.execute("FAKE.frame = 0; FAKE.time = 0"); tick(L)    # baseline, nothing to measure yet
+    L.execute("FAKE.frame = 60; FAKE.time = 1"); tick(L)   # 60 render fps
+    check("60 fps" in M.menu.header.stats and "DLSS default" in M.menu.header.stats, f"stats show fps and model: {M.menu.header.stats!r}")
+    for _ in range(3):
+        L.eval("LOOPS[2]")()
+    menu_lines = (tmp / "AC8Tweaks" / "menu.txt").read_text().split("\n")
+    check(any(l.startswith("stats\t") for l in menu_lines), f"stats line is written for the DLL: {menu_lines}")
+    use_menu(L, M, tmp, "set\tfg\t1")                       # 2x frame generation
+    L.execute("FAKE.frame = 120; FAKE.time = 2"); tick(L)   # 60 render, 120 shown
+    s = M.menu.header.stats
+    check("60 render" in s and "120 shown (x2)" in s, f"frame generation shows render and shown: {s!r}")
+    use_menu(L, M, tmp, "set\toverlay\t0"); tick(L)
+    check(M.menu.header.stats == "", "overlay off clears the stats line")
+
+
 def test_adaptive_in_game(tmp):
     L, M = boot(tmp, settings=ADAPTIVE)
     M.main()
@@ -479,21 +526,16 @@ def test_fov(tmp):
     check(len(fov_calls(L)) == n, "and then stays idle")
 
 
-def test_fov_keeps_target_zoom(tmp):
+def test_fov_holds_under_dynamic_camera(tmp):
+    # Regression: the locked angle must stay put while the game's own camera FieldOfView moves
+    # (dynamic speed FOV, target zoom). An earlier build scaled by it and the angle collapsed.
     L, M = boot(tmp, settings=FOV)  # cockpit 100
     M.main()
-    L.execute("FAKE.cam.Cockpit.bIsActive = true; FAKE.cam.Cockpit.FieldOfView = 73.74")
-    frame(L)
-    check(fov_calls(L)[-1] == 100, "at rest the wanted angle is locked as it is")
-    L.execute("FAKE.cam.Cockpit.FieldOfView = 36.87")  # the game zooms in on a focused target
-    frame(L)
-    check(abs(fov_calls(L)[-1] - 50) < 1e-6, f"the game's zoom narrows the locked angle in proportion: {fov_calls(L)}")
-    n = len(fov_calls(L))
-    frame(L)
-    check(len(fov_calls(L)) == n, "a held zoom makes no further calls")
-    L.execute("FAKE.cam.Cockpit.FieldOfView = 73.74")
-    frame(L)
-    check(fov_calls(L)[-1] == 100, "the wanted angle comes back when the zoom ends")
+    L.execute("FAKE.cam.Cockpit.bIsActive = true")
+    for own in (50, 55, 70, 65, 50, 48, 60, 50):
+        L.execute(f"FAKE.cam.Cockpit.FieldOfView = {own}; FAKE.fov = 90")  # game re-derives its own value
+        frame(L)
+        check(fov_calls(L)[-1] == 100, f"stays locked at 100 while the game camera is at {own}: got {fov_calls(L)[-1]}")
 
 
 def test_fov_off_costs_nothing(tmp):

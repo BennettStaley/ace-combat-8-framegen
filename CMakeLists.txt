@@ -50,3 +50,7 @@ install(DIRECTORY third_party/ue4ss/ DESTINATION Game/Binaries/Win64
 # The mod's own folder is replaced whole, so a script removed from the source never ships from an old dist.
 install(CODE "file(REMOVE_RECURSE \"\${CMAKE_INSTALL_PREFIX}/Game/Binaries/Win64/ue4ss/Mods/AC8Tweaks\")")
 install(DIRECTORY mod/ue4ss/ DESTINATION Game/Binaries/Win64/ue4ss)
+# RTX Dynamic Vibrance model without NVIDIA's evaluation watermark, installed over the game's own copy.
+# See third_party/deepdvc/SOURCE.txt. Steam's file verification restores the game's copy.
+install(FILES third_party/deepdvc/nvngx_deepdvc.dll
+        DESTINATION Game/Plugins/Marketplace/nvidia/StreamlineCore/Binaries/ThirdParty/Win64)
