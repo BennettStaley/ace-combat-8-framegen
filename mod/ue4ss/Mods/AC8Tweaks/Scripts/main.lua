@@ -22,6 +22,24 @@ local FG_ENABLE = "r.Streamline.DLSSG.Enable"
 local FG_FRAMES = "r.Streamline.DLSSG.FramesToGenerate"
 local FG_KEYS = { [FG_ENABLE] = true, [FG_FRAMES] = true }
 local REFLEX_MODE = "t.Streamline.Reflex.Mode"
+local DLSS_PRESET = "r.NGX.DLSS.Preset"
+-- DLSS super resolution models, by the number r.NGX.DLSS.Preset gives them (A = 1 .. M = 13; G, H, I, N
+-- and O fall back to the default). The game ships DLSS 310.2.1: A to F and J, K exist, L and M need 310.5.
+local DLSS_MODELS = {
+    { value = 0, name = "default", family = "default", about = "the game's choice, CNN as shipped" },
+    { value = 1, name = "A", family = "CNN", about = "oldest, least ghosting of the CNN set" },
+    { value = 2, name = "B", family = "CNN", about = "A tuned for ultra performance" },
+    { value = 3, name = "C", family = "CNN", about = "favours the current frame, less stable" },
+    { value = 4, name = "D", family = "CNN", about = "favours past frames, more ghosting" },
+    { value = 5, name = "E", family = "CNN", about = "improved D, the usual CNN default" },
+    { value = 6, name = "F", family = "CNN", about = "CNN default for ultra performance, DLAA" },
+    { value = 10, name = "J", family = "transformer", about = "less ghosting than K, some flicker" },
+    { value = 11, name = "K", family = "transformer", about = "best image quality, costs the most" },
+    { value = 12, name = "L", family = "transformer", about = "2nd gen, ultra performance, DLSS 310.5+" },
+    { value = 13, name = "M", family = "transformer", about = "2nd gen, performance mode, DLSS 310.5+" },
+}
+local DLSS_MODEL_NAMES = {}
+for i, m in ipairs(DLSS_MODELS) do DLSS_MODEL_NAMES[i] = m.name end
 local MAX_FPS = "t.MaxFPS"
 local MAX_STRIKES = 3 -- pushes that did not stick before a value is left alone
 local FOV_STEP = 5
@@ -32,9 +50,10 @@ local FOV_MIN, FOV_MAX = 40, 130
 local REFLEX_NAMES = { [0] = "off", [1] = "low latency", [2] = "boost" }
 local NOTE_SECONDS = 6 -- how long a message stays at the top of the menu
 local TOAST_SECONDS = 4 -- how long what a quick key did stays on screen
-local KEY_ACTIONS = { "Menu", "CycleFrameGeneration", "ToggleAdaptive", "CycleReflex", "FovUp", "FovDown" }
+local KEY_ACTIONS = { "Menu", "CycleFrameGeneration", "ToggleAdaptive", "CycleReflex", "CycleDlssModel", "FovUp", "FovDown" }
 local KEY_LABELS = { Menu = "Open and close this menu", CycleFrameGeneration = "Frame generation: off, 2x, 3x, 4x",
                      ToggleAdaptive = "Adaptive frame generation on or off", CycleReflex = "Reflex: off, low latency, boost",
+                     CycleDlssModel = "DLSS model: default, A to F, J to M",
                      FovUp = "Field of view up, in the view you are in", FovDown = "Field of view down" }
 local DEFAULT_KEYS = { Menu = "F10" } -- the quick keys start out unset
 local MODIFIERS = { { "CONTROL", "CTRL", 256 }, { "SHIFT", "SHIFT", 512 }, { "ALT", "ALT", 1024 } }
@@ -359,14 +378,32 @@ local function fg_name(desired)
     return ((tonumber(desired[FG_FRAMES]) or 1) + 1) .. "x"
 end
 
+-- Index into DLSS_MODELS of the model settings.ini asks for. A number not in the list counts as the default.
+function M.dlss_model_index(desired)
+    local value = tonumber((desired or M.desired)[DLSS_PRESET]) or 0
+    for i, m in ipairs(DLSS_MODELS) do
+        if m.value == value then return i end
+    end
+    return 1
+end
+
+local function dlss_model_text(i)
+    local m = DLSS_MODELS[i]
+    if m.family == m.name then return string.format("DLSS model %s: %s", m.name, m.about) end
+    return string.format("DLSS model %s, %s: %s", m.name, m.family, m.about)
+end
+
 -- Human-readable list of what differs between two loaded settings, for edits made on disk.
 function M.describe_changes(old_desired, new_desired, old_adaptive, new_adaptive, old_fov, new_fov)
     local out = {}
     if fg_name(old_desired) ~= fg_name(new_desired) then out[#out + 1] = "Frame generation " .. fg_name(new_desired) end
     local r0, r1 = tonumber(old_desired[REFLEX_MODE]), tonumber(new_desired[REFLEX_MODE])
     if r0 ~= r1 then out[#out + 1] = "Reflex " .. (REFLEX_NAMES[r1 or -1] or tostring(r1)) end
+    if M.dlss_model_index(old_desired) ~= M.dlss_model_index(new_desired) then
+        out[#out + 1] = dlss_model_text(M.dlss_model_index(new_desired))
+    end
     for cvar, value in pairs(new_desired) do
-        if cvar ~= FG_ENABLE and cvar ~= FG_FRAMES and cvar ~= REFLEX_MODE and old_desired[cvar] ~= value then
+        if cvar ~= FG_ENABLE and cvar ~= FG_FRAMES and cvar ~= REFLEX_MODE and cvar ~= DLSS_PRESET and old_desired[cvar] ~= value then
             out[#out + 1] = cvar .. " = " .. value
         end
     end
@@ -640,6 +677,18 @@ function M.cycle_reflex()
     M.notify("Reflex " .. REFLEX_NAMES[mode])
 end
 
+-- Sets the DLSS model by its index in DLSS_MODELS. The engine builds a new DLSS feature for the
+-- new model on the next frame, so it applies while flying.
+function M.set_dlss_model(i)
+    i = math.max(1, math.min(#DLSS_MODELS, i))
+    M.set(DLSS_PRESET, DLSS_MODELS[i].value)
+    M.notify(dlss_model_text(i))
+end
+
+function M.cycle_dlss_model()
+    M.set_dlss_model(M.dlss_model_index() % #DLSS_MODELS + 1)
+end
+
 -- Moves the field of view of the view the player is in by one step and saves it.
 -- A view still on the game's own value starts from the angle currently rendered.
 function M.adjust_fov(delta)
@@ -659,6 +708,7 @@ local ACTIONS = {
     CycleFrameGeneration = M.cycle_frame_generation,
     ToggleAdaptive = M.toggle_adaptive,
     CycleReflex = M.cycle_reflex,
+    CycleDlssModel = M.cycle_dlss_model,
     FovUp = function() M.adjust_fov(FOV_STEP) end,
     FovDown = function() M.adjust_fov(-FOV_STEP) end,
 }
@@ -776,6 +826,13 @@ local function graphics_rows()
         { id = "reflex", kind = "choice", label = "Reflex", choices = { "off", "low latency", "boost" },
           get = function() return tonumber(M.desired[REFLEX_MODE]) or 0 end,
           set = function(i) M.set(REFLEX_MODE, i) end },
+        { id = "dlss", kind = "choice", label = "DLSS model", choices = DLSS_MODEL_NAMES,
+          get = function() return M.dlss_model_index() - 1 end,
+          set = function(i) M.set_dlss_model(i + 1) end },
+        -- what the chosen model is, as a line under the choice: its family in the box, the rest as the label
+        { id = "dlss_about", kind = "text",
+          get = function() return DLSS_MODELS[M.dlss_model_index()].family end,
+          label = DLSS_MODELS[M.dlss_model_index()].about },
     }
     for _, view in ipairs(FOV_VIEWS) do rows[#rows + 1] = fov_row(view) end
     return rows

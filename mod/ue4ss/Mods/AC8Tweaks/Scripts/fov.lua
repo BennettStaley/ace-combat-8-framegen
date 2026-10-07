@@ -6,6 +6,10 @@ the game's LiveCameraViewComponent keeps one cached camera per view and marks th
 LivePlayerCameraManager reports the rendered angle, and PlayerController:FOV locks the final
 value. FOV(0) releases the lock and gives the game's own dynamic field of view back.
 Runs once per frame because the game re-derives its value every frame.
+
+The game's zoom on a focused target (holding the target view button) is kept: every frame the
+game eases the active camera's FieldOfView from its resting angle to a narrower one and back, and
+the locked angle is narrowed by the same proportion.
 ]]
 
 local F = {}
@@ -39,6 +43,7 @@ local function prune(list)
 end
 
 -- Name of the view the controller looks through, or nil when it is none of the three.
+-- Also returns that view's camera and the entry of the plane's view component.
 function F.view_of(manager)
     local controller = manager.PCOwner
     if not controller:IsValid() then return nil end
@@ -48,11 +53,22 @@ function F.view_of(manager)
         if view:IsValid() and view:GetOwner() == target then
             for _, v in ipairs(VIEWS) do
                 local camera = view[v.camera]
-                if camera:IsValid() and camera.bIsActive then return v.name end
+                if camera:IsValid() and camera.bIsActive then return v.name, camera, entry end
             end
         end
     end
     return nil
+end
+
+-- The wanted angle, narrowed by as much as the game has its own camera zoomed in on a target.
+-- The camera's resting angle is not exposed, so the widest angle seen on it stands in: the game
+-- only ever eases between the resting angle and a narrower one.
+function F.zoomed(wanted, view, camera, plane)
+    local own = camera.FieldOfView
+    if type(own) ~= "number" or own <= 0 then return wanted end
+    plane.rest = plane.rest or {}
+    plane.rest[view] = math.max(plane.rest[view] or 0, own)
+    return wanted * own / plane.rest[view]
 end
 
 local function release(entry)
@@ -77,11 +93,12 @@ function F.step()
         local manager = entry.object
         local controller = manager.PCOwner
         if controller:IsValid() then
-            local view = F.view_of(manager)
+            local view, camera, plane = F.view_of(manager)
             local wanted = view and cfg[view] or 0
-            local drifted = wanted > 0 and math.abs(manager:GetFOVAngle() - wanted) > 0.01
+            local angle = wanted > 0 and F.zoomed(wanted, view, camera, plane) or 0
+            local drifted = angle > 0 and math.abs(manager:GetFOVAngle() - angle) > 0.01
             if wanted ~= entry.applied or drifted then
-                controller:FOV(wanted)
+                controller:FOV(angle)
             end
             if view ~= entry.view or wanted ~= entry.applied then
                 log("fov %s: %s", view or "other", wanted == 0 and "game default" or tostring(wanted))

@@ -15,6 +15,7 @@ next launch.
 - An in-game menu on F10, worked with the mouse or the keyboard. No hotkeys to remember, no files to edit
 - Field of view per view: cockpit, HUD-only first person and third person, each remembered separately, 40 to 130 degrees
 - DLSS frame generation off, 2x, 3x or 4x, switchable while flying
+- The DLSS super resolution model: the game's own CNN or NVIDIA's transformer models, with a line on what each one is, switchable while flying
 - Adaptive mode: measures the base frame rate once a second and picks the smallest multiplier that reaches a target, by default the G-Sync cap for your monitor
 - Reflex off, low latency, or low latency with boost
 - Optional quick keys for frame generation, adaptive mode, Reflex and field of view, picked in the menu by pressing the key you want
@@ -57,7 +58,7 @@ the keys and clicks it uses do not reach the game; a gamepad keeps flying the ai
 
 | Group | What is in it |
 | --- | --- |
-| Graphics | Frame generation, adaptive mode and its target, Reflex, and the field of view of each of the three views |
+| Graphics | Frame generation, adaptive mode and its target, Reflex, the DLSS model, and the field of view of each of the three views |
 | Keys | The key that opens the menu, and the optional quick keys |
 | Menu | How the menu is drawn on an HDR screen, and how bright |
 
@@ -68,6 +69,42 @@ Everything in the menu is written to `settings.ini` as you change it.
 The game has three camera views and AC8 Tweaks keeps a value for each: cockpit, HUD (first person
 without the cockpit) and third person. Each has its own row in the menu, 40 to 130 degrees. Set a
 view to 0 to hand it back to the game's own dynamic field of view.
+
+The zoom on a target you hold focus on still works with your own value: the view narrows by the
+same proportion as it does in the unmodified game.
+
+## DLSS model
+
+DLSS super resolution has several neural network models, which NVIDIA names by letter. The game
+ships DLSS 310.2.1 and leaves the choice to it, which gives the older convolutional (CNN) models.
+The transformer models, introduced with DLSS 4, resolve more detail and ghost less at a higher
+GPU cost. The DLSS model row in the Graphics group picks one; the line under it says what the
+chosen model is. The change applies at once, on the next frame, so two models can be compared on
+the same scene. It only matters while the game's anti-aliasing option is DLSS.
+
+| Model | What it is |
+| --- | --- |
+| default | The game's own choice. CNN with the DLSS the game ships |
+| A | CNN. The oldest, least ghosting of the CNN set |
+| B | CNN. A tuned for ultra performance |
+| C | CNN. Favours the current frame: less ghosting, less stable |
+| D | CNN. Favours past frames: more stable, more ghosting |
+| E | CNN. An improved D, the usual CNN default |
+| F | CNN. The CNN default for ultra performance and DLAA |
+| J | Transformer. The first DLSS 4 model: less ghosting than K, some flicker |
+| K | Transformer. Best image quality, costs the most |
+| L | Second generation transformer for ultra performance. Needs DLSS 310.5 or newer |
+| M | Second generation transformer for performance mode. Needs DLSS 310.5 or newer |
+
+The descriptions follow NVIDIA's own notes on each model. K is the one to try first. L and M came
+with DLSS 4.5 and are not in the DLSS the game ships: they need a newer `nvngx_dlss.dll`, which
+the NVIDIA app's DLSS override or DLSS Swapper can put in place. Asked for a model its DLSS does
+not have, the game falls back to the default. If the NVIDIA app's model preset override is set
+for the game, that override wins over the choice here, so leave it on default to choose from the
+menu.
+
+In `settings.ini` the model is `r.NGX.DLSS.Preset` under `[ConsoleVariables]`, by NVIDIA's
+number: 0 default, 1 to 6 for A to F, 10 to 13 for J to M.
 
 ## Keys
 
@@ -82,6 +119,7 @@ The same group has quick keys for use without opening the menu. They start out u
 | Frame generation | Steps through off, 2x, 3x, 4x |
 | Adaptive frame generation | On or off. Off keeps the multiplier it had reached |
 | Reflex | Steps through off, low latency, boost |
+| DLSS model | Steps through default, A to F, J to M, and shows what the model is |
 | Field of view up and down | Moves the view you are looking through by 5 degrees and saves it. The other two views keep their own values |
 
 Pressing a quick key shows what it did in the corner of the screen for a few seconds. Backspace
@@ -96,7 +134,7 @@ writes the same file, so the two never disagree.
 
 | Section | What it holds |
 | --- | --- |
-| `[ConsoleVariables]` | Unreal console variables and their values. Frame generation, Reflex and anything else you add |
+| `[ConsoleVariables]` | Unreal console variables and their values. Frame generation, Reflex, the DLSS model and anything else you add |
 | `[Adaptive]` | `Enabled`, `TargetFps`, `HoldSeconds` between decisions, `ProbeSeconds` between attempts to step down when a frame cap hides headroom |
 | `[FOV]` | `Cockpit`, `HUD`, `ThirdPerson` in degrees, 40 to 130. 0 keeps the game's own value |
 | `[Keys]` | `Menu` and the quick keys, by name: `F7`, `CTRL+F7`, `NUM_ZERO`, `OEM_PLUS`. Empty means no key |

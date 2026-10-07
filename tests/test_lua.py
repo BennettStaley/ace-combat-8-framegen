@@ -15,6 +15,7 @@ MAIN = pathlib.Path(os.environ.get("AC8_MAIN", ROOT / "mod" / "ue4ss" / "Mods" /
 
 FG_ENABLE = "r.Streamline.DLSSG.Enable"
 FG_FRAMES = "r.Streamline.DLSSG.FramesToGenerate"
+DLSS_PRESET = "r.NGX.DLSS.Preset"
 
 FAKES = r"""
 FAKE = { store = {}, execs = {}, pc_valid = true, unsettable = {}, frame = 0, time = 0 }
@@ -319,6 +320,39 @@ def test_menu_frame_generation(tmp):
     check(store(L, "t.Streamline.Reflex.Mode") == 0 and "t.Streamline.Reflex.Mode=0" in settings_text(tmp), "reflex set and saved")
 
 
+def test_menu_dlss_model(tmp):
+    L, M = boot(tmp)
+    M.main()
+    tick(L)
+    names = "default|A|B|C|D|E|F|J|K|L|M"
+    lines = menu_send(L, tmp, "1\tmenu\t1")
+    check(f"row\tdlss\tchoice\tDLSS model\t0\t{names}" in lines, f"model row, on the game's own model: {lines}")
+    check("row\tdlss_about\ttext\tthe game's choice, CNN as shipped\tdefault" in lines, f"a line under it says what that is: {lines}")
+    lines = menu_send(L, tmp, "1\tmenu\t1", "2\tset\tdlss\t8")  # K
+    check(store(L, DLSS_PRESET) == 11 and f"{DLSS_PRESET}=11\n" in settings_text(tmp), "K is NVIDIA's number 11, set in the engine and saved")
+    check(f"row\tdlss\tchoice\tDLSS model\t8\t{names}" in lines, f"the menu shows K: {lines}")
+    check("row\tdlss_about\ttext\tbest image quality, costs the most\ttransformer" in lines, f"and what K is: {lines}")
+    tick(L)
+    check(store(L, DLSS_PRESET) == 11, "the settings tick keeps it")
+    M.key_pressed("CycleDlssModel")
+    check(store(L, DLSS_PRESET) == 12, "the quick key steps on to L")
+    for _ in range(3):
+        M.key_pressed("CycleDlssModel")
+    check(store(L, DLSS_PRESET) == 1, "and wraps round past M and default to A")
+    said = list(L.eval("LOG").values())
+    check(any("DLSS model A, CNN: oldest, least ghosting of the CNN set" in m for m in said), f"the key says what the model is: {said[-3:]}")
+    check(any("DLSS model default: the game's choice" in m for m in said), f"the default is not called 'default, default': {said[-3:]}")
+    path = tmp / "AC8Tweaks" / "settings.ini"
+    path.write_text(path.read_text().replace(f"{DLSS_PRESET}=1\n", f"{DLSS_PRESET}=10\n"))
+    tick(L)
+    check(store(L, DLSS_PRESET) == 10, "an edit on disk applies")
+    check(any("DLSS model J, transformer" in m for m in L.eval("LOG").values()), "and is reported by name, not by number")
+    path.write_text(path.read_text().replace(f"{DLSS_PRESET}=10\n", f"{DLSS_PRESET}=99\n"))
+    tick(L)
+    lines = menu_send(L, tmp, "3\tsection\tgraphics\t1")
+    check(f"row\tdlss\tchoice\tDLSS model\t0\t{names}" in lines, f"a number that is no model shows as the default: {lines}")
+
+
 def test_adaptive_in_game(tmp):
     L, M = boot(tmp, settings=ADAPTIVE)
     M.main()
@@ -443,6 +477,23 @@ def test_fov(tmp):
     frame(L)
     frame(L)
     check(len(fov_calls(L)) == n, "and then stays idle")
+
+
+def test_fov_keeps_target_zoom(tmp):
+    L, M = boot(tmp, settings=FOV)  # cockpit 100
+    M.main()
+    L.execute("FAKE.cam.Cockpit.bIsActive = true; FAKE.cam.Cockpit.FieldOfView = 73.74")
+    frame(L)
+    check(fov_calls(L)[-1] == 100, "at rest the wanted angle is locked as it is")
+    L.execute("FAKE.cam.Cockpit.FieldOfView = 36.87")  # the game zooms in on a focused target
+    frame(L)
+    check(abs(fov_calls(L)[-1] - 50) < 1e-6, f"the game's zoom narrows the locked angle in proportion: {fov_calls(L)}")
+    n = len(fov_calls(L))
+    frame(L)
+    check(len(fov_calls(L)) == n, "a held zoom makes no further calls")
+    L.execute("FAKE.cam.Cockpit.FieldOfView = 73.74")
+    frame(L)
+    check(fov_calls(L)[-1] == 100, "the wanted angle comes back when the zoom ends")
 
 
 def test_fov_off_costs_nothing(tmp):
